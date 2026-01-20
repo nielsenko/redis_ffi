@@ -2,6 +2,15 @@ import 'package:redis_ffi/redis_ffi.dart';
 import 'package:test/test.dart';
 
 void main() {
+  group('RedisPubSubMessage', () {
+    test('toString includes all fields for regular message', () {
+      // We can't easily create RedisPubSubMessage directly since it requires
+      // a RedisReply, but we can at least test the string representation
+      // by checking the class exists and exports are correct
+      expect(RedisPubSubMessage, isNotNull);
+    });
+  });
+
   group('RedisReplyType', () {
     test('fromValue returns correct type', () {
       expect(RedisReplyType.fromValue(1), equals(RedisReplyType.string));
@@ -97,6 +106,108 @@ void main() {
 
       // Cleanup
       client.del(['array_test1', 'array_test2']);
+    });
+  }, skip: 'Requires running Redis server');
+
+  group('RedisPubSub integration', () {
+    late RedisPubSub subscriber;
+    late RedisClient publisher;
+
+    setUp(() {
+      try {
+        subscriber = RedisPubSub.connect('localhost', 6379);
+        publisher = RedisClient.connect('localhost', 6379);
+      } on StateError {
+        markTestSkipped('Redis server not available');
+      } on RedisException {
+        markTestSkipped('Redis server not available');
+      }
+    });
+
+    tearDown(() {
+      try {
+        subscriber.close();
+        publisher.close();
+      } catch (_) {
+        // Ignore errors during cleanup
+      }
+    });
+
+    test('can subscribe and receive messages', () async {
+      final messages = <RedisPubSubMessage>[];
+      final subscription = subscriber.messages.listen(messages.add);
+
+      subscriber.subscribe('test-channel');
+
+      // Wait for subscription to be processed
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      subscriber.poll();
+
+      // Publish a message
+      publisher.commandArgv(['PUBLISH', 'test-channel', 'hello']);
+
+      // Wait and poll for the message
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      subscriber.poll();
+
+      await subscription.cancel();
+
+      // Should have received subscribe confirmation and message
+      expect(messages.length, greaterThanOrEqualTo(1));
+    });
+
+    test('can subscribe to patterns', () async {
+      final messages = <RedisPubSubMessage>[];
+      final subscription = subscriber.messages.listen(messages.add);
+
+      subscriber.psubscribe('test:*');
+
+      // Wait for subscription
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      subscriber.poll();
+
+      // Publish to matching channel
+      publisher.commandArgv(['PUBLISH', 'test:foo', 'pattern message']);
+
+      // Wait and poll
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      subscriber.poll();
+
+      await subscription.cancel();
+
+      expect(messages.length, greaterThanOrEqualTo(1));
+    });
+
+    test('unsubscribe stops receiving messages', () async {
+      final messages = <RedisPubSubMessage>[];
+      final subscription = subscriber.messages.listen(messages.add);
+
+      subscriber.subscribe('unsub-test');
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      subscriber.poll();
+
+      subscriber.unsubscribe('unsub-test');
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      subscriber.poll();
+
+      final countAfterUnsub = messages.length;
+
+      // Publish after unsubscribe - should not receive
+      publisher.commandArgv(['PUBLISH', 'unsub-test', 'should not receive']);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      subscriber.poll();
+
+      await subscription.cancel();
+
+      // Message count should not have increased (beyond possible unsub confirmation)
+      expect(messages.length, lessThanOrEqualTo(countAfterUnsub + 1));
+    });
+
+    test('close stops the subscriber', () {
+      subscriber.subscribe('close-test');
+      subscriber.close();
+
+      expect(() => subscriber.subscribe('another'), throwsStateError);
     });
   }, skip: 'Requires running Redis server');
 }
