@@ -1861,6 +1861,430 @@ class RedisClient {
     }
   }
 
+  // ============ Sorted Set Commands ============
+
+  /// Adds one or more members to a sorted set, or updates the score if the
+  /// member already exists.
+  ///
+  /// [members] is a map of member -> score pairs.
+  ///
+  /// Options:
+  /// - [nx]: Only add new members, don't update existing ones.
+  /// - [xx]: Only update existing members, don't add new ones.
+  /// - [gt]: Only update when the new score is greater than the current score.
+  /// - [lt]: Only update when the new score is less than the current score.
+  /// - [ch]: Return the number of changed elements (added + updated) instead
+  ///   of just added.
+  ///
+  /// Returns the number of elements added (or changed if [ch] is true).
+  Future<int> zadd(
+    String key,
+    Map<String, double> members, {
+    bool nx = false,
+    bool xx = false,
+    bool gt = false,
+    bool lt = false,
+    bool ch = false,
+  }) async {
+    final args = ['ZADD', key];
+    if (nx) args.add('NX');
+    if (xx) args.add('XX');
+    if (gt) args.add('GT');
+    if (lt) args.add('LT');
+    if (ch) args.add('CH');
+
+    for (final entry in members.entries) {
+      args.addAll([entry.value.toString(), entry.key]);
+    }
+
+    final reply = await command(args);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes one or more members from a sorted set.
+  ///
+  /// Returns the number of members removed.
+  Future<int> zrem(String key, List<String> members) async {
+    final reply = await command(['ZREM', key, ...members]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the score of a member in a sorted set.
+  Future<double?> zscore(String key, String member) async {
+    final reply = await command(['ZSCORE', key, member]);
+    try {
+      if (reply == null || reply.isNil) return null;
+      final str = reply.string;
+      return str != null ? double.parse(str) : null;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the scores of multiple members in a sorted set.
+  Future<List<double?>> zmscore(String key, List<String> members) async {
+    final reply = await command(['ZMSCORE', key, ...members]);
+    try {
+      final result = <double?>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final element = reply[i];
+        if (element == null || element.isNil) {
+          result.add(null);
+        } else {
+          final str = element.string;
+          result.add(str != null ? double.parse(str) : null);
+        }
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the rank (index) of a member in a sorted set (0-based).
+  ///
+  /// Members are ordered from lowest to highest score.
+  Future<int?> zrank(String key, String member) async {
+    final reply = await command(['ZRANK', key, member]);
+    try {
+      if (reply == null || reply.isNil) return null;
+      return reply.integer;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the reverse rank (index) of a member in a sorted set (0-based).
+  ///
+  /// Members are ordered from highest to lowest score.
+  Future<int?> zrevrank(String key, String member) async {
+    final reply = await command(['ZREVRANK', key, member]);
+    try {
+      if (reply == null || reply.isNil) return null;
+      return reply.integer;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the number of members in a sorted set.
+  Future<int> zcard(String key) async {
+    final reply = await command(['ZCARD', key]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the number of members in a sorted set with scores within the
+  /// given range.
+  Future<int> zcount(String key, String min, String max) async {
+    final reply = await command(['ZCOUNT', key, min, max]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns a range of members from a sorted set by index.
+  ///
+  /// If [withScores] is true, returns alternating member, score pairs.
+  Future<List<String>> zrange(
+    String key,
+    int start,
+    int stop, {
+    bool withScores = false,
+  }) async {
+    final args = ['ZRANGE', key, start.toString(), stop.toString()];
+    if (withScores) args.add('WITHSCORES');
+
+    final reply = await command(args);
+    try {
+      final result = <String>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final item = reply[i]?.string;
+        if (item != null) result.add(item);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns a range of members from a sorted set by index, with scores.
+  ///
+  /// Returns a list of (member, score) pairs.
+  Future<List<(String, double)>> zrangeWithScores(
+    String key,
+    int start,
+    int stop,
+  ) async {
+    final reply = await command([
+      'ZRANGE',
+      key,
+      start.toString(),
+      stop.toString(),
+      'WITHSCORES',
+    ]);
+    try {
+      final result = <(String, double)>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length - 1; i += 2) {
+        final member = reply[i]?.string;
+        final scoreStr = reply[i + 1]?.string;
+        if (member != null && scoreStr != null) {
+          result.add((member, double.parse(scoreStr)));
+        }
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns a range of members from a sorted set by score.
+  Future<List<String>> zrangebyscore(
+    String key,
+    String min,
+    String max, {
+    int? offset,
+    int? count,
+  }) async {
+    final args = ['ZRANGEBYSCORE', key, min, max];
+    if (offset != null && count != null) {
+      args.addAll(['LIMIT', offset.toString(), count.toString()]);
+    }
+
+    final reply = await command(args);
+    try {
+      final result = <String>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final item = reply[i]?.string;
+        if (item != null) result.add(item);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns a range of members from a sorted set by score (highest to lowest).
+  Future<List<String>> zrevrangebyscore(
+    String key,
+    String max,
+    String min, {
+    int? offset,
+    int? count,
+  }) async {
+    final args = ['ZREVRANGEBYSCORE', key, max, min];
+    if (offset != null && count != null) {
+      args.addAll(['LIMIT', offset.toString(), count.toString()]);
+    }
+
+    final reply = await command(args);
+    try {
+      final result = <String>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final item = reply[i]?.string;
+        if (item != null) result.add(item);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Increments the score of a member in a sorted set.
+  ///
+  /// Returns the new score.
+  Future<double> zincrby(String key, double increment, String member) async {
+    final reply = await command(['ZINCRBY', key, increment.toString(), member]);
+    try {
+      final str = reply?.string;
+      return str != null ? double.parse(str) : 0.0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes all members in a sorted set within the given score range.
+  ///
+  /// Returns the number of members removed.
+  Future<int> zremrangebyscore(String key, String min, String max) async {
+    final reply = await command(['ZREMRANGEBYSCORE', key, min, max]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes all members in a sorted set within the given rank range.
+  ///
+  /// Returns the number of members removed.
+  Future<int> zremrangebyrank(String key, int start, int stop) async {
+    final reply = await command([
+      'ZREMRANGEBYRANK',
+      key,
+      start.toString(),
+      stop.toString(),
+    ]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes and returns members with the lowest scores from a sorted set.
+  Future<List<(String, double)>> zpopmin(String key, {int count = 1}) async {
+    final reply = await command(['ZPOPMIN', key, count.toString()]);
+    try {
+      final result = <(String, double)>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length - 1; i += 2) {
+        final member = reply[i]?.string;
+        final scoreStr = reply[i + 1]?.string;
+        if (member != null && scoreStr != null) {
+          result.add((member, double.parse(scoreStr)));
+        }
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes and returns members with the highest scores from a sorted set.
+  Future<List<(String, double)>> zpopmax(String key, {int count = 1}) async {
+    final reply = await command(['ZPOPMAX', key, count.toString()]);
+    try {
+      final result = <(String, double)>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length - 1; i += 2) {
+        final member = reply[i]?.string;
+        final scoreStr = reply[i + 1]?.string;
+        if (member != null && scoreStr != null) {
+          result.add((member, double.parse(scoreStr)));
+        }
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Computes the union of multiple sorted sets and stores the result.
+  ///
+  /// Returns the number of members in the resulting set.
+  Future<int> zunionstore(
+    String destination,
+    List<String> keys, {
+    List<double>? weights,
+    String? aggregate,
+  }) async {
+    final args = ['ZUNIONSTORE', destination, keys.length.toString(), ...keys];
+    if (weights != null) {
+      args.add('WEIGHTS');
+      args.addAll(weights.map((w) => w.toString()));
+    }
+    if (aggregate != null) {
+      args.addAll(['AGGREGATE', aggregate]);
+    }
+
+    final reply = await command(args);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Computes the intersection of multiple sorted sets and stores the result.
+  ///
+  /// Returns the number of members in the resulting set.
+  Future<int> zinterstore(
+    String destination,
+    List<String> keys, {
+    List<double>? weights,
+    String? aggregate,
+  }) async {
+    final args = ['ZINTERSTORE', destination, keys.length.toString(), ...keys];
+    if (weights != null) {
+      args.add('WEIGHTS');
+      args.addAll(weights.map((w) => w.toString()));
+    }
+    if (aggregate != null) {
+      args.addAll(['AGGREGATE', aggregate]);
+    }
+
+    final reply = await command(args);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Incrementally iterates over members and scores in a sorted set.
+  ///
+  /// Returns a tuple of (nextCursor, memberScorePairs).
+  /// When nextCursor is '0', iteration is complete.
+  Future<(String, List<(String, double)>)> zscan(
+    String key,
+    String cursor, {
+    String? match,
+    int? count,
+  }) async {
+    final args = ['ZSCAN', key, cursor];
+    if (match != null) args.addAll(['MATCH', match]);
+    if (count != null) args.addAll(['COUNT', count.toString()]);
+
+    final reply = await command(args);
+    try {
+      if (reply == null || reply.length < 2) {
+        return ('0', <(String, double)>[]);
+      }
+
+      final nextCursor = reply[0]?.string ?? '0';
+      final itemsReply = reply[1];
+      final result = <(String, double)>[];
+      if (itemsReply != null) {
+        for (var i = 0; i < itemsReply.length - 1; i += 2) {
+          final member = itemsReply[i]?.string;
+          final scoreStr = itemsReply[i + 1]?.string;
+          if (member != null && scoreStr != null) {
+            result.add((member, double.parse(scoreStr)));
+          }
+        }
+      }
+      return (nextCursor, result);
+    } finally {
+      reply?.free();
+    }
+  }
+
   /// Executes multiple commands in a pipeline.
   ///
   /// All commands are sent at once, and results are returned in order.
