@@ -139,9 +139,11 @@ void main() {
 
     test('can subscribe and receive messages', () async {
       final messages = <RedisPubSubMessage>[];
-      final subscription = subscriber.messages.listen(messages.add);
 
-      await subscriber.subscribe(['test-channel']);
+      // subscribe() opens its own connection
+      final subscription = subscriber
+          .subscribe(channels: ['test-channel'])
+          .listen(messages.add);
 
       // Wait for subscription to be processed
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -152,6 +154,7 @@ void main() {
       // Wait for the message
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
+      // cancel() closes the subscription connection
       await subscription.cancel();
 
       // Should have received subscribe confirmation and message
@@ -160,9 +163,11 @@ void main() {
 
     test('can subscribe to patterns', () async {
       final messages = <RedisPubSubMessage>[];
-      final subscription = subscriber.messages.listen(messages.add);
 
-      await subscriber.psubscribe(['test:*']);
+      // subscribe with patterns
+      final subscription = subscriber
+          .subscribe(patterns: ['test:*'])
+          .listen(messages.add);
 
       // Wait for subscription
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -179,7 +184,11 @@ void main() {
     });
 
     test('close stops the client', () async {
-      await subscriber.subscribe(['close-test']);
+      final subscription = subscriber
+          .subscribe(channels: ['close-test'])
+          .listen((_) {});
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await subscription.cancel();
       await subscriber.close();
 
       expect(() => subscriber.command(['PING']), throwsStateError);

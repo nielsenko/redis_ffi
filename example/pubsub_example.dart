@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:redis_ffi/redis_ffi.dart';
 
 /// Example demonstrating Redis pub/sub functionality.
@@ -10,65 +8,42 @@ void main() async {
   print('Redis Pub/Sub Example');
   print('=====================\n');
 
-  // Create a client for subscribing
-  final subscriber = await RedisClient.connect('localhost', 6379);
-
-  // Create a separate client for publishing (can't publish on a subscribed connection)
-  final publisher = await RedisClient.connect('localhost', 6379);
+  // Create a single client - subscribe() opens its own dedicated connection
+  final client = await RedisClient.connect('localhost', 6379);
 
   try {
-    // Listen to messages
-    final subscription = subscriber.messages.listen((message) {
-      print('Received message:');
-      print('  Type: ${message.type}');
-      print('  Channel: ${message.channel}');
-      print('  Pattern: ${message.pattern ?? "(none)"}');
-      print('  Message: ${message.message ?? "(none)"}');
-      print('');
-    });
+    // Subscribe to channels and patterns in a single call
+    // This opens a dedicated connection for the subscription
+    print('Subscribing to channels and patterns...\n');
+    final subscription = client
+        .subscribe(channels: ['news', 'alerts'], patterns: ['user:*'])
+        .listen((message) {
+          if (message.type == 'message' || message.type == 'pmessage') {
+            print('[${message.channel}]: ${message.message}');
+          }
+        });
 
-    // Subscribe to channels
-    print('Subscribing to "news" and "alerts" channels...');
-    await subscriber.subscribe(['news', 'alerts']);
-
-    // Subscribe to a pattern
-    print('Subscribing to pattern "user:*"...\n');
-    await subscriber.psubscribe(['user:*']);
-
-    // Give some time for subscriptions to be processed
+    // Small delay to ensure subscription is active
     await Future<void>.delayed(const Duration(milliseconds: 100));
 
-    // Publish some messages
+    // Publish some messages (uses the main client connection)
     print('Publishing messages...\n');
+    await client.publish('news', 'Breaking: Dart 3.10 released!');
+    await client.publish('alerts', 'System maintenance tonight');
+    await client.publish('user:123', 'User 123 logged in');
+    await client.publish('user:456', 'User 456 updated profile');
 
-    await publisher.publish('news', 'Breaking: Dart 3.10 released!');
-    await Future<void>.delayed(const Duration(milliseconds: 50));
+    // Small delay to receive messages
+    await Future<void>.delayed(const Duration(milliseconds: 100));
 
-    await publisher.publish('alerts', 'System maintenance tonight');
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-
-    await publisher.publish('user:123', 'User 123 logged in');
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-
-    await publisher.publish('user:456', 'User 456 updated profile');
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-
-    // Wait a bit for messages to be received
-    await Future<void>.delayed(const Duration(milliseconds: 200));
-
-    // Unsubscribe
-    print('Unsubscribing from "news"...');
-    await subscriber.unsubscribe(['news']);
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-
-    // Cancel the stream subscription
+    // Cancel subscription (closes the dedicated connection)
+    print('\nCancelling subscription...');
     await subscription.cancel();
 
     print('Done!');
   } on RedisException catch (e) {
     print('Redis error: $e');
   } finally {
-    await subscriber.close();
-    await publisher.close();
+    await client.close();
   }
 }
