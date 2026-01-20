@@ -12,6 +12,8 @@ const c = @cImport({
     @cInclude("async.h");
 });
 
+const is_windows = builtin.os.tag == .windows;
+
 /// Result of a poll operation.
 pub const PollResult = enum(c_int) {
     /// Timeout expired, no events.
@@ -40,6 +42,14 @@ pub const PollResult = enum(c_int) {
 export fn redis_async_poll(ctx: ?*c.redisAsyncContext, timeout_ms: c_int) PollResult {
     const async_ctx = ctx orelse return .err;
 
+    if (is_windows) {
+        return redis_async_poll_windows(async_ctx, timeout_ms);
+    } else {
+        return redis_async_poll_posix(async_ctx, timeout_ms);
+    }
+}
+
+fn redis_async_poll_posix(async_ctx: *c.redisAsyncContext, timeout_ms: c_int) PollResult {
     const fd = async_ctx.c.fd;
     if (fd < 0) return .closed;
 
@@ -83,6 +93,70 @@ export fn redis_async_poll(ctx: ?*c.redisAsyncContext, timeout_ms: c_int) PollRe
     return .activity;
 }
 
+fn redis_async_poll_windows(async_ctx: *c.redisAsyncContext, timeout_ms: c_int) PollResult {
+    // On Windows, fd is a SOCKET (UINT_PTR), not an int
+    const socket_raw = async_ctx.c.fd;
+    // INVALID_SOCKET is ~0 (all bits set)
+    if (socket_raw == ~@as(@TypeOf(socket_raw), 0)) return .closed;
+
+    // Use select() on Windows since WSAPoll has issues
+    const ws2 = std.os.windows.ws2_32;
+
+    // Cast the raw socket value to Zig's SOCKET type
+    const socket: ws2.SOCKET = @ptrFromInt(socket_raw);
+
+    var read_fds: ws2.fd_set = .{ .fd_count = 0, .fd_array = undefined };
+    var write_fds: ws2.fd_set = .{ .fd_count = 0, .fd_array = undefined };
+    var except_fds: ws2.fd_set = .{ .fd_count = 0, .fd_array = undefined };
+
+    // Always watch for read
+    read_fds.fd_array[0] = socket;
+    read_fds.fd_count = 1;
+
+    // Watch for write if we have data to send
+    if (async_ctx.c.obuf != null and std.mem.len(async_ctx.c.obuf) > 0) {
+        write_fds.fd_array[0] = socket;
+        write_fds.fd_count = 1;
+    }
+
+    // Watch for errors
+    except_fds.fd_array[0] = socket;
+    except_fds.fd_count = 1;
+
+    // Set up timeout
+    var timeout: ws2.timeval = undefined;
+    var timeout_ptr: ?*ws2.timeval = null;
+    if (timeout_ms >= 0) {
+        timeout.sec = @divTrunc(timeout_ms, 1000);
+        timeout.usec = @mod(timeout_ms, 1000) * 1000;
+        timeout_ptr = &timeout;
+    }
+
+    const result = ws2.select(0, &read_fds, &write_fds, &except_fds, timeout_ptr);
+
+    if (result == ws2.SOCKET_ERROR) {
+        return .err;
+    }
+    if (result == 0) {
+        return .timeout;
+    }
+
+    // Check for errors
+    if (except_fds.fd_count > 0) {
+        return .closed;
+    }
+
+    // Handle I/O
+    if (read_fds.fd_count > 0) {
+        c.redisAsyncHandleRead(async_ctx);
+    }
+    if (write_fds.fd_count > 0) {
+        c.redisAsyncHandleWrite(async_ctx);
+    }
+
+    return .activity;
+}
+
 /// Runs a blocking event loop that waits for socket activity.
 ///
 /// This function blocks on poll() waiting for I/O events and processes them.
@@ -107,7 +181,11 @@ export fn redis_async_run_loop(
         if (stop.*) break;
 
         // Check if connection is still valid
-        if (async_ctx.c.fd < 0) break;
+        if (is_windows) {
+            if (async_ctx.c.fd == ~@as(@TypeOf(async_ctx.c.fd), 0)) break;
+        } else {
+            if (async_ctx.c.fd < 0) break;
+        }
         if (async_ctx.c.flags & c.REDIS_DISCONNECTING != 0) break;
 
         // Block waiting for socket activity (up to 100ms to allow periodic stop flag checks)
@@ -126,15 +204,28 @@ export fn redis_async_run_loop(
 
 /// Gets the file descriptor from an async context.
 /// Returns -1 if the context is null or disconnected.
+/// Note: On Windows, this returns the lower 32 bits of the SOCKET handle.
 export fn redis_async_get_fd(ctx: ?*c.redisAsyncContext) c_int {
     const async_ctx = ctx orelse return -1;
-    return async_ctx.c.fd;
+    if (is_windows) {
+        // On Windows, fd is a SOCKET (UINT_PTR). Return lower 32 bits.
+        const socket = async_ctx.c.fd;
+        if (socket == ~@as(@TypeOf(socket), 0)) return -1;
+        return @truncate(@as(i64, @bitCast(socket)));
+    } else {
+        return async_ctx.c.fd;
+    }
 }
 
 /// Checks if the async context is connected.
 export fn redis_async_is_connected(ctx: ?*c.redisAsyncContext) bool {
     const async_ctx = ctx orelse return false;
-    if (async_ctx.c.fd < 0) return false;
+    if (is_windows) {
+        // On Windows, INVALID_SOCKET is ~0
+        if (async_ctx.c.fd == ~@as(@TypeOf(async_ctx.c.fd), 0)) return false;
+    } else {
+        if (async_ctx.c.fd < 0) return false;
+    }
     if (async_ctx.c.flags & c.REDIS_CONNECTED == 0) return false;
     if (async_ctx.c.flags & c.REDIS_DISCONNECTING != 0) return false;
     return true;
