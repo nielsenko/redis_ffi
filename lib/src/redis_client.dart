@@ -491,16 +491,14 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
   final pendingCallbacks = <int, int>{};
   var nextPrivdata = 1;
   var running = true;
-  Timer? pollTimer;
 
-  // Create the callback
+  // Reply callback - called by hiredis when a command completes
   void onReply(
     Pointer<redisAsyncContext> ac,
     Pointer<Void> replyPtr,
     Pointer<Void> privdata,
   ) {
-    // Ignore callbacks after shutdown - this can happen during
-    // redisAsyncDisconnect/redisAsyncFree
+    // Ignore callbacks after shutdown
     if (!running) return;
 
     final privdataValue = privdata.address;
@@ -530,7 +528,6 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
             typeStr == 'psubscribe' ||
             typeStr == 'punsubscribe') {
           _handlePubSubReply(args.replyPort, reply, typeStr, bindings);
-          // Also complete the command if there was one
           if (commandId != null) {
             args.replyPort.send(
               _ReplyMessage(commandId, replyPtr.address, null),
@@ -542,36 +539,45 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
     }
 
     if (commandId != null) {
-      // Send the reply address back - the main isolate will wrap it
       args.replyPort.send(_ReplyMessage(commandId, replyPtr.address, null));
     }
   }
 
-  final callback =
+  final replyCallback =
       NativeCallable<
         Void Function(Pointer<redisAsyncContext>, Pointer<Void>, Pointer<Void>)
       >.listener(onReply);
 
-  void cleanup() {
-    // Signal that we're shutting down - the onReply callback checks this
-    // and will return early, preventing any sends to the reply port
-    running = false;
-    pollTimer?.cancel();
-    pollTimer = null;
+  // Allocate stop flag that Zig will check to know when to exit the loop.
+  final stopFlag = calloc<Bool>();
+  stopFlag.value = false;
 
-    // Free the context directly - redisAsyncFree handles cleanup internally.
-    // Note: Don't call redisAsyncDisconnect before redisAsyncFree as that
-    // puts the context in a "disconnecting" state that requires event loop
-    // pumping to complete, which would cause redisAsyncFree to block.
+  // Handle to the background thread running the I/O loop
+  Pointer<LoopThreadHandle>? loopThreadHandle;
+
+  void cleanup() {
+    running = false;
+
+    // Signal the Zig loop to stop via the shared flag
+    stopFlag.value = true;
+
+    // Stop the background thread and wait for it to exit
+    if (loopThreadHandle != null) {
+      bindings.redis_async_stop_loop_thread(loopThreadHandle!);
+      loopThreadHandle = null;
+    }
+
+    // Free the context
     bindings.redisAsyncFree(ctx);
 
-    // NOW it's safe to close the callback - no more native calls will happen
-    callback.close();
+    // Close the reply callback
+    replyCallback.close();
 
-    // Close the command port
+    // Free the stop flag
+    calloc.free(stopFlag);
+
+    // Close the command port and exit
     commandPort.close();
-
-    // Explicitly exit the isolate to ensure clean termination
     Isolate.exit();
   }
 
@@ -582,7 +588,7 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
       return;
     }
 
-    if (!running) return; // Ignore commands after shutdown started
+    if (!running) return;
 
     if (message is _CommandMessage) {
       final cmdArgs = message.args;
@@ -597,13 +603,12 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
           argvlen[i] = cmdArgs[i].length;
         }
 
-        // Use privdata to track which command this reply is for
         final privdata = nextPrivdata++;
         pendingCallbacks[privdata] = message.commandId;
 
         bindings.redisAsyncCommandArgv(
           ctx,
-          callback.nativeFunction.cast(),
+          replyCallback.nativeFunction.cast(),
           Pointer<Void>.fromAddress(privdata),
           argc,
           argv,
@@ -624,18 +629,20 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
     }
   });
 
-  // Poll loop - use a simple recursive timer instead of periodic
-  // to avoid overlapping poll calls
-  void schedulePoll() {
-    if (!running) return;
-    pollTimer = Timer(const Duration(milliseconds: 1), () {
-      if (!running) return;
-      bindings.redis_async_poll(ctx, 0);
-      schedulePoll(); // Schedule next poll
-    });
-  }
+  // Start the blocking I/O loop on a background thread.
+  // This spawns a native thread that runs the blocking poll loop, leaving
+  // Dart's event loop free to process commands from the main isolate.
+  loopThreadHandle = bindings.redis_async_start_loop_thread(ctx, stopFlag);
 
-  schedulePoll();
+  if (loopThreadHandle == null || loopThreadHandle == nullptr) {
+    // Failed to start the loop thread - clean up and exit
+    replyCallback.close();
+    calloc.free(stopFlag);
+    bindings.redisAsyncFree(ctx);
+    commandPort.close();
+    Isolate.exit();
+    return;
+  }
 }
 
 void _handlePubSubReply(

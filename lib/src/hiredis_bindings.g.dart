@@ -1723,29 +1723,37 @@ class HiredisBindings {
   late final _redis_async_poll = _redis_async_pollPtr
       .asFunction<int Function(ffi.Pointer<redisAsyncContext>, int)>();
 
-  /// Starts a polling loop in the current thread.
+  /// Runs a blocking event loop that waits for socket activity.
   ///
-  /// This function runs until:
-  /// - The context is disconnected
-  /// - An unrecoverable error occurs
+  /// This function blocks on poll() waiting for I/O events and processes them.
+  ///
+  /// The loop exits when:
+  /// - The stop_flag pointer is set to true (non-zero)
+  /// - The connection is closed or errors
+  /// - The context becomes invalid
   ///
   /// @param ctx The async context to run the loop for.
-  /// @param poll_interval_ms Timeout for each poll iteration.
+  /// @param stop_flag Pointer to a bool that Dart can set to signal stop.
   void redis_async_run_loop(
     ffi.Pointer<redisAsyncContext> ctx,
-    int poll_interval_ms,
+    ffi.Pointer<ffi.Bool> stop_flag,
   ) {
-    return _redis_async_run_loop(ctx, poll_interval_ms);
+    return _redis_async_run_loop(ctx, stop_flag);
   }
 
   late final _redis_async_run_loopPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Void Function(ffi.Pointer<redisAsyncContext>, ffi.Int)
+          ffi.Void Function(
+            ffi.Pointer<redisAsyncContext>,
+            ffi.Pointer<ffi.Bool>,
+          )
         >
       >('redis_async_run_loop');
   late final _redis_async_run_loop = _redis_async_run_loopPtr
-      .asFunction<void Function(ffi.Pointer<redisAsyncContext>, int)>();
+      .asFunction<
+        void Function(ffi.Pointer<redisAsyncContext>, ffi.Pointer<ffi.Bool>)
+      >();
 
   /// Gets the file descriptor from an async context.
   /// @return The fd, or -1 if the context is null or disconnected.
@@ -1784,6 +1792,55 @@ class HiredisBindings {
       >('redis_async_flush');
   late final _redis_async_flush = _redis_async_flushPtr
       .asFunction<void Function(ffi.Pointer<redisAsyncContext>)>();
+
+  /// Starts the event loop on a background thread.
+  ///
+  /// This function spawns a new thread that runs the blocking event loop,
+  /// allowing the calling thread (Dart's event loop) to continue processing.
+  ///
+  /// @param ctx The async context to run the loop for.
+  /// @param stop_flag Pointer to a bool that can be set to signal stop.
+  /// @return Opaque handle pointer, or NULL on failure.
+  ffi.Pointer<LoopThreadHandle> redis_async_start_loop_thread(
+    ffi.Pointer<redisAsyncContext> ctx,
+    ffi.Pointer<ffi.Bool> stop_flag,
+  ) {
+    return _redis_async_start_loop_thread(ctx, stop_flag);
+  }
+
+  late final _redis_async_start_loop_threadPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<LoopThreadHandle> Function(
+            ffi.Pointer<redisAsyncContext>,
+            ffi.Pointer<ffi.Bool>,
+          )
+        >
+      >('redis_async_start_loop_thread');
+  late final _redis_async_start_loop_thread = _redis_async_start_loop_threadPtr
+      .asFunction<
+        ffi.Pointer<LoopThreadHandle> Function(
+          ffi.Pointer<redisAsyncContext>,
+          ffi.Pointer<ffi.Bool>,
+        )
+      >();
+
+  /// Stops the background loop thread and cleans up resources.
+  ///
+  /// This function sets the stop flag, waits for the thread to exit,
+  /// and frees all associated resources.
+  ///
+  /// @param handle The handle returned by redis_async_start_loop_thread.
+  void redis_async_stop_loop_thread(ffi.Pointer<LoopThreadHandle> handle) {
+    return _redis_async_stop_loop_thread(handle);
+  }
+
+  late final _redis_async_stop_loop_threadPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<LoopThreadHandle>)>
+      >('redis_async_stop_loop_thread');
+  late final _redis_async_stop_loop_thread = _redis_async_stop_loop_threadPtr
+      .asFunction<void Function(ffi.Pointer<LoopThreadHandle>)>();
 }
 
 final class redisReadTask extends ffi.Struct {
@@ -2312,6 +2369,8 @@ enum RedisPollResult {
     _ => throw ArgumentError('Unknown value for RedisPollResult: $value'),
   };
 }
+
+final class LoopThreadHandle extends ffi.Opaque {}
 
 const int REDIS_ERR = -1;
 

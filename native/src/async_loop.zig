@@ -83,28 +83,44 @@ export fn redis_async_poll(ctx: ?*c.redisAsyncContext, timeout_ms: c_int) PollRe
     return .activity;
 }
 
-/// Starts a polling loop in the current thread.
+/// Runs a blocking event loop that waits for socket activity.
 ///
-/// This function runs until:
-/// - The context is disconnected
-/// - `redis_async_stop_loop` is called
-/// - An unrecoverable error occurs
+/// This function blocks on poll() waiting for I/O events and processes them.
 ///
-/// The `poll_interval_ms` controls how often to check for stop requests
-/// between I/O operations.
-export fn redis_async_run_loop(ctx: ?*c.redisAsyncContext, poll_interval_ms: c_int) void {
+/// The loop exits when:
+/// - The stop_flag pointer is set to true (non-zero)
+/// - The connection is closed or errors
+/// - The context becomes invalid
+///
+/// Parameters:
+/// - ctx: The async Redis context
+/// - stop_flag: Pointer to a bool that Dart can set to signal stop
+export fn redis_async_run_loop(
+    ctx: ?*c.redisAsyncContext,
+    stop_flag: ?*volatile bool,
+) void {
     const async_ctx = ctx orelse return;
+    const stop = stop_flag orelse return;
 
     while (true) {
-        // Check if we should stop (context disconnected or freed)
+        // Check stop flag first
+        if (stop.*) break;
+
+        // Check if connection is still valid
         if (async_ctx.c.fd < 0) break;
         if (async_ctx.c.flags & c.REDIS_DISCONNECTING != 0) break;
 
-        const result = redis_async_poll(ctx, poll_interval_ms);
+        // Block waiting for socket activity (up to 100ms to allow periodic stop flag checks)
+        const result = redis_async_poll(ctx, 100);
+
+        // Check result
         switch (result) {
             .closed, .err => break,
-            .timeout, .activity => continue,
+            .timeout, .activity => {},
         }
+
+        // Check stop flag again after poll
+        if (stop.*) break;
     }
 }
 
@@ -128,4 +144,91 @@ export fn redis_async_is_connected(ctx: ?*c.redisAsyncContext) bool {
 export fn redis_async_flush(ctx: ?*c.redisAsyncContext) void {
     const async_ctx = ctx orelse return;
     c.redisAsyncHandleWrite(async_ctx);
+}
+
+/// Thread context for the background loop.
+const LoopThreadContext = struct {
+    ctx: *c.redisAsyncContext,
+    stop_flag: *volatile bool,
+};
+
+/// Handle to a background loop thread.
+pub const LoopThreadHandle = struct {
+    thread: std.Thread,
+    context: *LoopThreadContext,
+};
+
+/// Global allocator for thread contexts.
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
+/// Starts the event loop on a background thread.
+///
+/// This function spawns a new thread that runs the blocking event loop,
+/// allowing the calling thread (Dart's event loop) to continue processing.
+///
+/// Returns an opaque handle that must be passed to redis_async_stop_loop_thread
+/// to stop the thread and clean up resources.
+///
+/// Parameters:
+/// - ctx: The async Redis context
+/// - stop_flag: Pointer to a bool that can be set to signal stop
+///
+/// Returns: Opaque handle pointer, or null on failure.
+export fn redis_async_start_loop_thread(
+    ctx: ?*c.redisAsyncContext,
+    stop_flag: ?*volatile bool,
+) ?*LoopThreadHandle {
+    const async_ctx = ctx orelse return null;
+    const stop = stop_flag orelse return null;
+
+    const allocator = gpa.allocator();
+
+    // Allocate context struct
+    const thread_ctx = allocator.create(LoopThreadContext) catch return null;
+    thread_ctx.* = .{
+        .ctx = async_ctx,
+        .stop_flag = stop,
+    };
+
+    // Allocate handle
+    const handle = allocator.create(LoopThreadHandle) catch {
+        allocator.destroy(thread_ctx);
+        return null;
+    };
+
+    // Spawn thread
+    handle.thread = std.Thread.spawn(.{}, struct {
+        fn run(context: *LoopThreadContext) void {
+            redis_async_run_loop(@ptrCast(context.ctx), context.stop_flag);
+        }
+    }.run, .{thread_ctx}) catch {
+        allocator.destroy(handle);
+        allocator.destroy(thread_ctx);
+        return null;
+    };
+
+    handle.context = thread_ctx;
+    return handle;
+}
+
+/// Stops the background loop thread and cleans up resources.
+///
+/// This function sets the stop flag, waits for the thread to exit,
+/// and frees all associated resources.
+///
+/// Parameters:
+/// - handle: The handle returned by redis_async_start_loop_thread
+export fn redis_async_stop_loop_thread(handle: ?*LoopThreadHandle) void {
+    const h = handle orelse return;
+    const allocator = gpa.allocator();
+
+    // Signal stop (caller should have already done this, but ensure it)
+    h.context.stop_flag.* = true;
+
+    // Wait for thread to exit
+    h.thread.join();
+
+    // Free resources
+    allocator.destroy(h.context);
+    allocator.destroy(h);
 }

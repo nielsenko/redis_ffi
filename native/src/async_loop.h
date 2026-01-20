@@ -31,15 +31,18 @@ typedef enum {
 /// @return Poll result code.
 RedisPollResult redis_async_poll(redisAsyncContext *ctx, int timeout_ms);
 
-/// Starts a polling loop in the current thread.
+/// Runs a blocking event loop that waits for socket activity.
 ///
-/// This function runs until:
-/// - The context is disconnected
-/// - An unrecoverable error occurs
+/// This function blocks on poll() waiting for I/O events and processes them.
+///
+/// The loop exits when:
+/// - The stop_flag pointer is set to true (non-zero)
+/// - The connection is closed or errors
+/// - The context becomes invalid
 ///
 /// @param ctx The async context to run the loop for.
-/// @param poll_interval_ms Timeout for each poll iteration.
-void redis_async_run_loop(redisAsyncContext *ctx, int poll_interval_ms);
+/// @param stop_flag Pointer to a bool that Dart can set to signal stop.
+void redis_async_run_loop(redisAsyncContext *ctx, volatile bool *stop_flag);
 
 /// Gets the file descriptor from an async context.
 /// @return The fd, or -1 if the context is null or disconnected.
@@ -51,6 +54,30 @@ bool redis_async_is_connected(redisAsyncContext *ctx);
 
 /// Forces a write flush - sends any pending commands immediately.
 void redis_async_flush(redisAsyncContext *ctx);
+
+/// Opaque handle to a background loop thread.
+typedef struct LoopThreadHandle LoopThreadHandle;
+
+/// Starts the event loop on a background thread.
+///
+/// This function spawns a new thread that runs the blocking event loop,
+/// allowing the calling thread (Dart's event loop) to continue processing.
+///
+/// @param ctx The async context to run the loop for.
+/// @param stop_flag Pointer to a bool that can be set to signal stop.
+/// @return Opaque handle pointer, or NULL on failure.
+LoopThreadHandle* redis_async_start_loop_thread(
+    redisAsyncContext *ctx,
+    volatile bool *stop_flag
+);
+
+/// Stops the background loop thread and cleans up resources.
+///
+/// This function sets the stop flag, waits for the thread to exit,
+/// and frees all associated resources.
+///
+/// @param handle The handle returned by redis_async_start_loop_thread.
+void redis_async_stop_loop_thread(LoopThreadHandle *handle);
 
 #ifdef __cplusplus
 }

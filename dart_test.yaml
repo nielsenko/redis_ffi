@@ -14,5 +14,5 @@
 
 tags:
   redis:
-    # Skip redis-tagged tests by default
-    skip: "Requires running Redis server. Run with: dart test -t redis"
+    # Tests tagged with 'redis' require a running Redis server
+    # To start a Redis server: redis-server --daemonize yes --port 6379
