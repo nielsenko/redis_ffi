@@ -1578,6 +1578,289 @@ class RedisClient {
     }
   }
 
+  // ============ Set Commands ============
+
+  /// Adds one or more members to a set.
+  ///
+  /// Returns the number of members that were added (not already present).
+  Future<int> sadd(String key, List<String> members) async {
+    final reply = await command(['SADD', key, ...members]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes one or more members from a set.
+  ///
+  /// Returns the number of members that were removed.
+  Future<int> srem(String key, List<String> members) async {
+    final reply = await command(['SREM', key, ...members]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns all members of a set.
+  Future<Set<String>> smembers(String key) async {
+    final reply = await command(['SMEMBERS', key]);
+    try {
+      final result = <String>{};
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final member = reply[i]?.string;
+        if (member != null) result.add(member);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Checks if a member is in a set.
+  Future<bool> sismember(String key, String member) async {
+    final reply = await command(['SISMEMBER', key, member]);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Checks if multiple members are in a set.
+  ///
+  /// Returns a list of booleans indicating membership for each member.
+  Future<List<bool>> smismember(String key, List<String> members) async {
+    final reply = await command(['SMISMEMBER', key, ...members]);
+    try {
+      final result = <bool>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        result.add((reply[i]?.integer ?? 0) == 1);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the number of members in a set.
+  Future<int> scard(String key) async {
+    final reply = await command(['SCARD', key]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes and returns a random member from a set.
+  Future<String?> spop(String key) async {
+    final reply = await command(['SPOP', key]);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes and returns multiple random members from a set.
+  Future<Set<String>> spopCount(String key, int count) async {
+    final reply = await command(['SPOP', key, count.toString()]);
+    try {
+      final result = <String>{};
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final member = reply[i]?.string;
+        if (member != null) result.add(member);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns a random member from a set without removing it.
+  Future<String?> srandmember(String key) async {
+    final reply = await command(['SRANDMEMBER', key]);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns multiple random members from a set without removing them.
+  Future<List<String>> srandmemberCount(String key, int count) async {
+    final reply = await command(['SRANDMEMBER', key, count.toString()]);
+    try {
+      final result = <String>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final member = reply[i]?.string;
+        if (member != null) result.add(member);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Moves a member from one set to another.
+  ///
+  /// Returns `true` if the member was moved, `false` if it wasn't in the source
+  /// set.
+  Future<bool> smove(String source, String destination, String member) async {
+    final reply = await command(['SMOVE', source, destination, member]);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the difference between the first set and all subsequent sets.
+  Future<Set<String>> sdiff(List<String> keys) async {
+    final reply = await command(['SDIFF', ...keys]);
+    try {
+      final result = <String>{};
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final member = reply[i]?.string;
+        if (member != null) result.add(member);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Stores the difference between sets in a destination set.
+  ///
+  /// Returns the number of members in the resulting set.
+  Future<int> sdiffstore(String destination, List<String> keys) async {
+    final reply = await command(['SDIFFSTORE', destination, ...keys]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the intersection of all given sets.
+  Future<Set<String>> sinter(List<String> keys) async {
+    final reply = await command(['SINTER', ...keys]);
+    try {
+      final result = <String>{};
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final member = reply[i]?.string;
+        if (member != null) result.add(member);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Stores the intersection of sets in a destination set.
+  ///
+  /// Returns the number of members in the resulting set.
+  Future<int> sinterstore(String destination, List<String> keys) async {
+    final reply = await command(['SINTERSTORE', destination, ...keys]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the cardinality of the intersection of all given sets.
+  Future<int> sintercard(List<String> keys, {int? limit}) async {
+    final args = ['SINTERCARD', keys.length.toString(), ...keys];
+    if (limit != null) args.addAll(['LIMIT', limit.toString()]);
+
+    final reply = await command(args);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the union of all given sets.
+  Future<Set<String>> sunion(List<String> keys) async {
+    final reply = await command(['SUNION', ...keys]);
+    try {
+      final result = <String>{};
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final member = reply[i]?.string;
+        if (member != null) result.add(member);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Stores the union of sets in a destination set.
+  ///
+  /// Returns the number of members in the resulting set.
+  Future<int> sunionstore(String destination, List<String> keys) async {
+    final reply = await command(['SUNIONSTORE', destination, ...keys]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Incrementally iterates over members of a set.
+  ///
+  /// Returns a tuple of (nextCursor, members).
+  /// When nextCursor is '0', iteration is complete.
+  Future<(String, Set<String>)> sscan(
+    String key,
+    String cursor, {
+    String? match,
+    int? count,
+  }) async {
+    final args = ['SSCAN', key, cursor];
+    if (match != null) args.addAll(['MATCH', match]);
+    if (count != null) args.addAll(['COUNT', count.toString()]);
+
+    final reply = await command(args);
+    try {
+      if (reply == null || reply.length < 2) {
+        return ('0', <String>{});
+      }
+
+      final nextCursor = reply[0]?.string ?? '0';
+      final itemsReply = reply[1];
+      final result = <String>{};
+      if (itemsReply != null) {
+        for (var i = 0; i < itemsReply.length; i++) {
+          final member = itemsReply[i]?.string;
+          if (member != null) result.add(member);
+        }
+      }
+      return (nextCursor, result);
+    } finally {
+      reply?.free();
+    }
+  }
+
   /// Executes multiple commands in a pipeline.
   ///
   /// All commands are sent at once, and results are returned in order.
