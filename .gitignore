@@ -9,4 +9,9 @@ pubspec.lock
 # Zig build artifacts
 native/.zig-cache/
 native/zig-out/
+
+# Prebuilt libraries (built via tool/build_all.dart)
+native/lib/
+
+# Redis dump file
 dump.rdb
