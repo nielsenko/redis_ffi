@@ -727,7 +727,9 @@ class RedisClient {
 
   // ============ Key Commands ============
 
-  /// Deletes keys.
+  /// Deletes one or more keys.
+  ///
+  /// Returns the number of keys that were deleted.
   Future<int> del(List<String> keys) async {
     final reply = await command(['DEL', ...keys]);
     try {
@@ -737,11 +739,309 @@ class RedisClient {
     }
   }
 
+  /// Deletes one or more keys asynchronously (non-blocking).
+  ///
+  /// Returns the number of keys that were scheduled for deletion.
+  Future<int> unlink(List<String> keys) async {
+    final reply = await command(['UNLINK', ...keys]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Checks if one or more keys exist.
+  ///
+  /// Returns the number of keys that exist.
+  Future<int> existsCount(List<String> keys) async {
+    final reply = await command(['EXISTS', ...keys]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
   /// Checks if a key exists.
   Future<bool> exists(String key) async {
-    final reply = await command(['EXISTS', key]);
+    return (await existsCount([key])) > 0;
+  }
+
+  /// Sets a timeout on a key in seconds.
+  ///
+  /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
+  Future<bool> expire(String key, int seconds) async {
+    final reply = await command(['EXPIRE', key, seconds.toString()]);
     try {
-      return (reply?.integer ?? 0) > 0;
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Sets a timeout on a key in milliseconds.
+  ///
+  /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
+  Future<bool> pexpire(String key, int milliseconds) async {
+    final reply = await command(['PEXPIRE', key, milliseconds.toString()]);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Sets an absolute Unix timestamp expiry on a key (in seconds).
+  ///
+  /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
+  Future<bool> expireat(String key, int timestamp) async {
+    final reply = await command(['EXPIREAT', key, timestamp.toString()]);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Sets an absolute Unix timestamp expiry on a key (in milliseconds).
+  ///
+  /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
+  Future<bool> pexpireat(String key, int timestamp) async {
+    final reply = await command(['PEXPIREAT', key, timestamp.toString()]);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets the remaining time to live of a key in seconds.
+  ///
+  /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
+  Future<int> ttl(String key) async {
+    final reply = await command(['TTL', key]);
+    try {
+      return reply?.integer ?? -2;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets the remaining time to live of a key in milliseconds.
+  ///
+  /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
+  Future<int> pttl(String key) async {
+    final reply = await command(['PTTL', key]);
+    try {
+      return reply?.integer ?? -2;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes the expiry from a key.
+  ///
+  /// Returns `true` if the timeout was removed, `false` if the key doesn't
+  /// exist or has no associated timeout.
+  Future<bool> persist(String key) async {
+    final reply = await command(['PERSIST', key]);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the absolute Unix timestamp (in seconds) at which the key will expire.
+  ///
+  /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
+  Future<int> expiretime(String key) async {
+    final reply = await command(['EXPIRETIME', key]);
+    try {
+      return reply?.integer ?? -2;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the absolute Unix timestamp (in milliseconds) at which the key will expire.
+  ///
+  /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
+  Future<int> pexpiretime(String key) async {
+    final reply = await command(['PEXPIRETIME', key]);
+    try {
+      return reply?.integer ?? -2;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the type of the value stored at key.
+  ///
+  /// Returns "none" if the key doesn't exist.
+  Future<String> type(String key) async {
+    final reply = await command(['TYPE', key]);
+    try {
+      return reply?.string ?? 'none';
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Renames a key.
+  ///
+  /// Throws if the key doesn't exist.
+  Future<void> rename(String key, String newKey) async {
+    final reply = await command(['RENAME', key, newKey]);
+    reply?.free();
+  }
+
+  /// Renames a key only if the new key doesn't already exist.
+  ///
+  /// Returns `true` if the key was renamed, `false` if the new key already exists.
+  Future<bool> renamenx(String key, String newKey) async {
+    final reply = await command(['RENAMENX', key, newKey]);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns all keys matching the given pattern.
+  ///
+  /// Warning: KEYS should not be used in production as it may block the server.
+  /// Use [scan] instead for production workloads.
+  Future<List<String>> keys(String pattern) async {
+    final reply = await command(['KEYS', pattern]);
+    try {
+      if (reply == null) return [];
+      final results = <String>[];
+      for (var i = 0; i < reply.length; i++) {
+        final key = reply[i]?.string;
+        if (key != null) results.add(key);
+      }
+      return results;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Incrementally iterates over keys matching a pattern.
+  ///
+  /// Returns a tuple of (nextCursor, keys). When nextCursor is "0", iteration is complete.
+  Future<(String, List<String>)> scan(
+    String cursor, {
+    String? match,
+    int? count,
+    String? type,
+  }) async {
+    final args = ['SCAN', cursor];
+    if (match != null) args.addAll(['MATCH', match]);
+    if (count != null) args.addAll(['COUNT', count.toString()]);
+    if (type != null) args.addAll(['TYPE', type]);
+
+    final reply = await command(args);
+    try {
+      if (reply == null || reply.length < 2) return ('0', <String>[]);
+
+      final nextCursor = reply[0]?.string ?? '0';
+      final keysReply = reply[1];
+      final keys = <String>[];
+      if (keysReply != null) {
+        for (var i = 0; i < keysReply.length; i++) {
+          final key = keysReply[i]?.string;
+          if (key != null) keys.add(key);
+        }
+      }
+      return (nextCursor, keys);
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns a random key from the database.
+  Future<String?> randomkey() async {
+    final reply = await command(['RANDOMKEY']);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Touches one or more keys (updates last access time).
+  ///
+  /// Returns the number of keys that were touched.
+  Future<int> touch(List<String> keys) async {
+    final reply = await command(['TOUCH', ...keys]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the number of bytes that a key and its value require in RAM.
+  Future<int?> memoryUsage(String key, {int? samples}) async {
+    final args = ['MEMORY', 'USAGE', key];
+    if (samples != null) args.addAll(['SAMPLES', samples.toString()]);
+
+    final reply = await command(args);
+    try {
+      return reply?.integer;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Copies a key to another key.
+  ///
+  /// Returns `true` if the key was copied, `false` otherwise.
+  Future<bool> copy(
+    String source,
+    String destination, {
+    int? db,
+    bool replace = false,
+  }) async {
+    final args = ['COPY', source, destination];
+    if (db != null) args.addAll(['DB', db.toString()]);
+    if (replace) args.add('REPLACE');
+
+    final reply = await command(args);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the time since the object stored at key is idle.
+  Future<int?> objectIdletime(String key) async {
+    final reply = await command(['OBJECT', 'IDLETIME', key]);
+    try {
+      return reply?.integer;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the access frequency of the object stored at key.
+  Future<int?> objectFreq(String key) async {
+    final reply = await command(['OBJECT', 'FREQ', key]);
+    try {
+      return reply?.integer;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the encoding of the object stored at key.
+  Future<String?> objectEncoding(String key) async {
+    final reply = await command(['OBJECT', 'ENCODING', key]);
+    try {
+      return reply?.string;
     } finally {
       reply?.free();
     }
