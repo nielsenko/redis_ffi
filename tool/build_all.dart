@@ -18,19 +18,16 @@ import 'dart:io';
 const zigVersion = '0.14.0';
 
 /// Target configurations: platform name -> zig target triple.
-/// Note: Android and iOS are excluded because they require NDK/SDK sysroots
-/// that Zig doesn't bundle. Those platforms need separate build infrastructure.
+///
+/// Note: Android and iOS are excluded because Zig doesn't bundle their libc.
+/// For mobile platforms, use Flutter's build system which handles NDK/SDK
+/// automatically via the `native_toolchain_c` package in hook/build.dart.
 const targets = <String, String>{
   'linux-x64': 'x86_64-linux-gnu',
   'linux-arm64': 'aarch64-linux-gnu',
   'macos-x64': 'x86_64-macos',
   'macos-arm64': 'aarch64-macos',
   'windows-x64': 'x86_64-windows',
-  // Android and iOS require platform SDKs - build separately with NDK/Xcode
-  // 'android-arm64': 'aarch64-linux-android',
-  // 'android-arm': 'arm-linux-androideabi',
-  // 'android-x64': 'x86_64-linux-android',
-  // 'ios-arm64': 'aarch64-ios',
 };
 
 Future<void> main(List<String> args) async {
