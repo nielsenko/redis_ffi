@@ -216,6 +216,7 @@ class RedisClient {
         // Create ports for isolate communication
         final replyPort = ReceivePort();
         final initPort = ReceivePort();
+        final exitPort = ReceivePort();
 
         // Start the polling isolate
         final isolate = await Isolate.spawn(
@@ -225,11 +226,13 @@ class RedisClient {
             replyPort: replyPort.sendPort,
             initPort: initPort.sendPort,
           ),
+          onExit: exitPort.sendPort,
         );
 
         // Wait for the isolate to send us its command port
         final commandPort = await initPort.first as SendPort;
         initPort.close();
+        exitPort.close(); // We don't need to listen, just register it
 
         // Set up reply handling
         final client = RedisClient._(
@@ -412,16 +415,17 @@ class RedisClient {
     if (_closed) return;
     _closed = true;
 
-    // Tell the isolate to stop and clean up (it will free the context)
+    // Tell the isolate to stop and clean up (it will free the context and exit)
     _commandPort.send(null);
 
-    // Give the isolate time to clean up
-    await Future<void>.delayed(const Duration(milliseconds: 50));
+    // Give the isolate time to clean up and exit
+    await Future<void>.delayed(const Duration(milliseconds: 100));
 
     // Clean up on our side
     await _replySubscription.cancel();
     _replyPort.close();
-    _pollIsolate.kill();
+    // Force kill the isolate if it hasn't terminated yet
+    _pollIsolate.kill(priority: Isolate.immediate);
     await _pubsubController.close();
 
     // Complete any pending commands with errors
@@ -486,6 +490,8 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
   // Map from privdata to command id
   final pendingCallbacks = <int, int>{};
   var nextPrivdata = 1;
+  var running = true;
+  Timer? pollTimer;
 
   // Create the callback
   void onReply(
@@ -493,6 +499,10 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
     Pointer<Void> replyPtr,
     Pointer<Void> privdata,
   ) {
+    // Ignore callbacks after shutdown - this can happen during
+    // redisAsyncDisconnect/redisAsyncFree
+    if (!running) return;
+
     final privdataValue = privdata.address;
     final commandId = pendingCallbacks.remove(privdataValue);
 
@@ -542,19 +552,27 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
         Void Function(Pointer<redisAsyncContext>, Pointer<Void>, Pointer<Void>)
       >.listener(onReply);
 
-  var running = true;
-  Timer? pollTimer;
-
   void cleanup() {
+    // Signal that we're shutting down - the onReply callback checks this
+    // and will return early, preventing any sends to the reply port
     running = false;
     pollTimer?.cancel();
-    // First disconnect, then free the context.
-    // Note: We don't close the callback before freeing because
-    // redisAsyncFree may invoke callbacks during cleanup.
-    bindings.redisAsyncDisconnect(ctx);
+    pollTimer = null;
+
+    // Free the context directly - redisAsyncFree handles cleanup internally.
+    // Note: Don't call redisAsyncDisconnect before redisAsyncFree as that
+    // puts the context in a "disconnecting" state that requires event loop
+    // pumping to complete, which would cause redisAsyncFree to block.
     bindings.redisAsyncFree(ctx);
+
+    // NOW it's safe to close the callback - no more native calls will happen
     callback.close();
+
+    // Close the command port
     commandPort.close();
+
+    // Explicitly exit the isolate to ensure clean termination
+    Isolate.exit();
   }
 
   // Listen for commands from main isolate
@@ -563,6 +581,8 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
       cleanup();
       return;
     }
+
+    if (!running) return; // Ignore commands after shutdown started
 
     if (message is _CommandMessage) {
       final cmdArgs = message.args;
@@ -604,11 +624,18 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
     }
   });
 
-  // Poll loop
-  pollTimer = Timer.periodic(const Duration(milliseconds: 1), (_) {
+  // Poll loop - use a simple recursive timer instead of periodic
+  // to avoid overlapping poll calls
+  void schedulePoll() {
     if (!running) return;
-    bindings.redis_async_poll(ctx, 0);
-  });
+    pollTimer = Timer(const Duration(milliseconds: 1), () {
+      if (!running) return;
+      bindings.redis_async_poll(ctx, 0);
+      schedulePoll(); // Schedule next poll
+    });
+  }
+
+  schedulePoll();
 }
 
 void _handlePubSubReply(
