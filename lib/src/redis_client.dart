@@ -1047,6 +1047,279 @@ class RedisClient {
     }
   }
 
+  // ============ Hash Commands ============
+
+  /// Sets a field in a hash.
+  ///
+  /// Returns the number of fields that were added (0 if the field already
+  /// existed and was updated).
+  Future<int> hset(String key, String field, String value) async {
+    final reply = await command(['HSET', key, field, value]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Sets multiple fields in a hash.
+  ///
+  /// Returns the number of fields that were added.
+  Future<int> hsetAll(String key, Map<String, String> fieldValues) async {
+    final args = ['HSET', key];
+    for (final entry in fieldValues.entries) {
+      args.addAll([entry.key, entry.value]);
+    }
+
+    final reply = await command(args);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets the value of a field in a hash.
+  Future<String?> hget(String key, String field) async {
+    final reply = await command(['HGET', key, field]);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets all fields and values in a hash.
+  Future<Map<String, String>> hgetall(String key) async {
+    final reply = await command(['HGETALL', key]);
+    try {
+      final result = <String, String>{};
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length - 1; i += 2) {
+        final field = reply[i]?.string;
+        final value = reply[i + 1]?.string;
+        if (field != null && value != null) {
+          result[field] = value;
+        }
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets the values of multiple fields in a hash.
+  Future<List<String?>> hmget(String key, List<String> fields) async {
+    final reply = await command(['HMGET', key, ...fields]);
+    try {
+      final result = <String?>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        result.add(reply[i]?.string);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Deletes one or more fields from a hash.
+  ///
+  /// Returns the number of fields that were removed.
+  Future<int> hdel(String key, List<String> fields) async {
+    final reply = await command(['HDEL', key, ...fields]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Checks if a field exists in a hash.
+  Future<bool> hexists(String key, String field) async {
+    final reply = await command(['HEXISTS', key, field]);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets all field names in a hash.
+  Future<List<String>> hkeys(String key) async {
+    final reply = await command(['HKEYS', key]);
+    try {
+      final result = <String>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final field = reply[i]?.string;
+        if (field != null) result.add(field);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets all values in a hash.
+  Future<List<String>> hvals(String key) async {
+    final reply = await command(['HVALS', key]);
+    try {
+      final result = <String>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final value = reply[i]?.string;
+        if (value != null) result.add(value);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets the number of fields in a hash.
+  Future<int> hlen(String key) async {
+    final reply = await command(['HLEN', key]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Increments the integer value of a field in a hash.
+  ///
+  /// Returns the value after the increment.
+  Future<int> hincrby(String key, String field, int increment) async {
+    final reply = await command(['HINCRBY', key, field, increment.toString()]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Increments the float value of a field in a hash.
+  ///
+  /// Returns the value after the increment.
+  Future<double> hincrbyfloat(
+    String key,
+    String field,
+    double increment,
+  ) async {
+    final reply = await command([
+      'HINCRBYFLOAT',
+      key,
+      field,
+      increment.toString(),
+    ]);
+    try {
+      final str = reply?.string;
+      return str != null ? double.parse(str) : 0.0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Sets a field in a hash only if it does not exist.
+  ///
+  /// Returns `true` if the field was set, `false` if it already existed.
+  Future<bool> hsetnx(String key, String field, String value) async {
+    final reply = await command(['HSETNX', key, field, value]);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets the string length of a field value in a hash.
+  Future<int> hstrlen(String key, String field) async {
+    final reply = await command(['HSTRLEN', key, field]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns a random field from a hash.
+  ///
+  /// If [count] is provided, returns that many fields (or fewer if the hash
+  /// is smaller). If [withValues] is true, returns field-value pairs.
+  Future<List<String>> hrandfield(
+    String key, {
+    int? count,
+    bool withValues = false,
+  }) async {
+    final args = ['HRANDFIELD', key];
+    if (count != null) {
+      args.add(count.toString());
+      if (withValues) args.add('WITHVALUES');
+    }
+
+    final reply = await command(args);
+    try {
+      final result = <String>[];
+      if (reply == null) return result;
+
+      // Single field returned as string, multiple as array
+      if (reply.string != null) {
+        result.add(reply.string!);
+      } else {
+        for (var i = 0; i < reply.length; i++) {
+          final item = reply[i]?.string;
+          if (item != null) result.add(item);
+        }
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Incrementally iterates over fields in a hash.
+  ///
+  /// Returns a tuple of (nextCursor, fieldValuePairs).
+  /// When nextCursor is '0', iteration is complete.
+  Future<(String, Map<String, String>)> hscan(
+    String key,
+    String cursor, {
+    String? match,
+    int? count,
+  }) async {
+    final args = ['HSCAN', key, cursor];
+    if (match != null) args.addAll(['MATCH', match]);
+    if (count != null) args.addAll(['COUNT', count.toString()]);
+
+    final reply = await command(args);
+    try {
+      if (reply == null || reply.length < 2) {
+        return ('0', <String, String>{});
+      }
+
+      final nextCursor = reply[0]?.string ?? '0';
+      final itemsReply = reply[1];
+      final result = <String, String>{};
+      if (itemsReply != null) {
+        for (var i = 0; i < itemsReply.length - 1; i += 2) {
+          final field = itemsReply[i]?.string;
+          final value = itemsReply[i + 1]?.string;
+          if (field != null && value != null) {
+            result[field] = value;
+          }
+        }
+      }
+      return (nextCursor, result);
+    } finally {
+      reply?.free();
+    }
+  }
+
   /// Executes multiple commands in a pipeline.
   ///
   /// All commands are sent at once, and results are returned in order.
