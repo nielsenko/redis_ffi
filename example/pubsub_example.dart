@@ -18,7 +18,7 @@ void main() async {
     final subscription = client
         .subscribe(channels: ['news', 'alerts'], patterns: ['user:*'])
         .listen((message) {
-          if (message.type == 'message' || message.type == 'pmessage') {
+          if (message.type == .message || message.type == .pmessage) {
             print('[${message.channel}]: ${message.message}');
           }
         });

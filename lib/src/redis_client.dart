@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
@@ -18,26 +17,83 @@ class RedisException implements Exception {
   String toString() => 'RedisException: $message';
 }
 
+/// The type of a Redis pub/sub message.
+enum RedisPubSubMessageType {
+  /// A message published to a channel.
+  message,
+
+  /// A message matching a pattern subscription.
+  pmessage,
+
+  /// Confirmation of a channel subscription.
+  subscribe,
+
+  /// Confirmation of a channel unsubscription.
+  unsubscribe,
+
+  /// Confirmation of a pattern subscription.
+  psubscribe,
+
+  /// Confirmation of a pattern unsubscription.
+  punsubscribe,
+}
+
 /// A message received from a Redis pub/sub subscription.
+///
+/// String fields are lazily converted from the native reply to avoid
+/// unnecessary UTF-8 decoding if the fields are not accessed.
 class RedisPubSubMessage {
-  /// The type of message ('message', 'pmessage', 'subscribe', etc.)
-  final String type;
+  /// The type of message.
+  final RedisPubSubMessageType type;
 
   /// The channel the message was received on.
   final String channel;
 
+  // Lazy message field
+  final Pointer<Char>? _messagePtr;
+  final int _messageLen;
+  String? _message;
+  bool _messageConverted = false;
+
+  // Lazy pattern field
+  final Pointer<Char>? _patternPtr;
+  final int _patternLen;
+  String? _pattern;
+  bool _patternConverted = false;
+
   /// The message payload (null for subscribe/unsubscribe confirmations).
-  final String? message;
+  String? get message {
+    if (!_messageConverted) {
+      _messageConverted = true;
+      if (_messagePtr != null) {
+        _message = _messagePtr!.cast<Utf8>().toDartString(length: _messageLen);
+      }
+    }
+    return _message;
+  }
 
   /// The pattern that matched (for pmessage type only).
-  final String? pattern;
+  String? get pattern {
+    if (!_patternConverted) {
+      _patternConverted = true;
+      if (_patternPtr != null) {
+        _pattern = _patternPtr.cast<Utf8>().toDartString(length: _patternLen);
+      }
+    }
+    return _pattern;
+  }
 
   RedisPubSubMessage._({
     required this.type,
     required this.channel,
-    this.message,
-    this.pattern,
-  });
+    Pointer<Char>? messagePtr,
+    int messageLen = 0,
+    Pointer<Char>? patternPtr,
+    int patternLen = 0,
+  }) : _messagePtr = messagePtr,
+       _messageLen = messageLen,
+       _patternPtr = patternPtr,
+       _patternLen = patternLen;
 
   @override
   String toString() {
@@ -68,26 +124,29 @@ class RedisClient {
   final String _host;
   final int _port;
   final HiredisBindings _bindings;
-  final DynamicLibrary _dylib;
-  final SendPort _commandPort;
-  final Isolate _pollIsolate;
-  final RawReceivePort _replyPort;
+  final Pointer<redisAsyncContext> _ctx;
+  final Pointer<Bool> _stopFlag;
+  final NativeCallable<
+    Void Function(Pointer<redisAsyncContext>, Pointer<Void>, Pointer<Void>)
+  >
+  _replyCallback;
+  Pointer<LoopThreadHandle>? _loopThreadHandle;
 
   final _pendingCommands = <int, Completer<RedisReply?>>{};
+  final _pendingCallbacks = <int, int>{}; // privdata -> commandId
   var _nextCommandId = 0;
+  var _nextPrivdata = 1;
   var _closed = false;
 
   RedisClient._(
     this._host,
     this._port,
     this._bindings,
-    this._dylib,
-    this._commandPort,
-    this._pollIsolate,
-    this._replyPort,
-  ) {
-    _replyPort.handler = _handleReply;
-  }
+    this._ctx,
+    this._stopFlag,
+    this._replyCallback,
+    this._loopThreadHandle,
+  );
 
   /// Opens the hiredis dynamic library.
   static DynamicLibrary _openLibrary() {
@@ -215,33 +274,67 @@ class RedisClient {
           throw RedisException('Connection failed: $errStr');
         }
 
-        // Create ports for isolate communication
-        final replyPort = RawReceivePort(null, 'replyPort');
-        final initPort = ReceivePort();
+        // Allocate stop flag for the I/O loop thread
+        final stopFlag = calloc<Bool>();
+        stopFlag.value = false;
 
-        // Start the polling isolate
-        final isolate = await Isolate.spawn(
-          _pollIsolateEntry,
-          _PollIsolateArgs(
-            ctxAddress: ctx.address,
-            replyPort: replyPort.sendPort,
-            initPort: initPort.sendPort,
-          ),
+        // Create the client first (needed for callback closure)
+        late final RedisClient client;
+
+        // Reply callback - called by hiredis when a command completes
+        void onReply(
+          Pointer<redisAsyncContext> ac,
+          Pointer<Void> replyPtr,
+          Pointer<Void> privdata,
+        ) {
+          if (client._closed) return;
+
+          final privdataValue = privdata.address;
+          final commandId = client._pendingCallbacks.remove(privdataValue);
+
+          if (commandId == null) return;
+
+          final completer = client._pendingCommands.remove(commandId);
+          if (completer == null) return;
+
+          if (replyPtr == nullptr) {
+            completer.completeError(RedisException('Null reply'));
+            return;
+          }
+
+          completer.complete(RedisReply.fromPointer(bindings, dylib, replyPtr));
+        }
+
+        final replyCallback =
+            NativeCallable<
+              Void Function(
+                Pointer<redisAsyncContext>,
+                Pointer<Void>,
+                Pointer<Void>,
+              )
+            >.listener(onReply);
+
+        // Start the I/O loop on a background thread
+        final loopThreadHandle = bindings.redis_async_start_loop_thread(
+          ctx,
+          stopFlag,
         );
 
-        // Wait for the isolate to send us its command port
-        final commandPort = await initPort.first as SendPort;
-        initPort.close();
+        if (loopThreadHandle == nullptr) {
+          replyCallback.close();
+          calloc.free(stopFlag);
+          bindings.redisAsyncFree(ctx);
+          throw RedisException('Failed to start I/O loop thread');
+        }
 
-        // Set up reply handling
-        final client = RedisClient._(
+        client = RedisClient._(
           host,
           port,
           bindings,
-          dylib,
-          commandPort,
-          isolate,
-          replyPort,
+          ctx,
+          stopFlag,
+          replyCallback,
+          loopThreadHandle,
         );
 
         return client;
@@ -258,29 +351,6 @@ class RedisClient {
     return errstr.cast<Utf8>().toDartString();
   }
 
-  void _handleReply(dynamic message) {
-    if (message is _ReplyMessage) {
-      final completer = _pendingCommands.remove(message.commandId);
-      if (completer != null) {
-        if (message.replyAddress != 0) {
-          final replyPtr = Pointer<redisReply>.fromAddress(
-            message.replyAddress,
-          );
-          final reply = RedisReply.fromPointer(
-            _bindings,
-            _dylib,
-            replyPtr.cast(),
-          );
-          completer.complete(reply);
-        } else if (message.error != null) {
-          completer.completeError(RedisException(message.error!));
-        } else {
-          completer.complete(null);
-        }
-      }
-    }
-  }
-
   void _checkNotClosed() {
     if (_closed) {
       throw StateError('RedisClient has been closed');
@@ -295,7 +365,40 @@ class RedisClient {
     final completer = Completer<RedisReply?>();
     _pendingCommands[commandId] = completer;
 
-    _commandPort.send(_CommandMessage(commandId, args));
+    final argc = args.length;
+    final argv = calloc<Pointer<Char>>(argc);
+    final argvlen = calloc<Size>(argc);
+
+    try {
+      for (var i = 0; i < argc; i++) {
+        final arg = args[i].toNativeUtf8();
+        argv[i] = arg.cast();
+        argvlen[i] = args[i].length;
+      }
+
+      final privdata = _nextPrivdata++;
+      _pendingCallbacks[privdata] = commandId;
+
+      _bindings.redisAsyncCommandArgv(
+        _ctx,
+        _replyCallback.nativeFunction.cast(),
+        Pointer<Void>.fromAddress(privdata),
+        argc,
+        argv,
+        argvlen,
+      );
+
+      // Flush to send the command immediately
+      _bindings.redis_async_flush(_ctx);
+    } finally {
+      for (var i = 0; i < argc; i++) {
+        if (argv[i] != nullptr) {
+          calloc.free(argv[i].cast<Utf8>());
+        }
+      }
+      calloc.free(argv);
+      calloc.free(argvlen);
+    }
 
     return completer.future;
   }
@@ -422,31 +525,46 @@ class RedisClient {
       completer.completeError(RedisException('Client closed'));
     }
     _pendingCommands.clear();
+    _pendingCallbacks.clear();
 
-    // Tell the isolate to stop and clean up (it will free the context and exit)
-    _commandPort.send(null);
+    // Signal the I/O loop to stop
+    _stopFlag.value = true;
 
-    // Give the isolate time to clean up and exit
-    await Future<void>.delayed(const Duration(milliseconds: 50));
+    // Stop the background thread and wait for it to exit
+    if (_loopThreadHandle != null) {
+      _bindings.redis_async_stop_loop_thread(_loopThreadHandle!);
+      _loopThreadHandle = null;
+    }
 
-    // Allow the process to exit even if port isn't closed yet
-    _replyPort.keepIsolateAlive = false;
-
-    // Close the reply port
-    _replyPort.close();
-
-    // Force kill the isolate if it hasn't terminated yet
-    _pollIsolate.kill(priority: Isolate.immediate);
-
-    // Note: The isolate is responsible for calling redisAsyncFree
-    // after closing the NativeCallable
+    // Free resources
+    _bindings.redisAsyncFree(_ctx);
+    _replyCallback.close();
+    calloc.free(_stopFlag);
   }
 }
 
 // ============ Redis Subscription ============
 
-/// A subscription stream that manages its own Redis connection.
+/// A subscription that manages its own Redis connection.
 class _RedisSubscription {
+  final HiredisBindings _bindings;
+  final Pointer<redisAsyncContext> _ctx;
+  final Pointer<Bool> _stopFlag;
+  final NativeCallable<
+    Void Function(Pointer<redisAsyncContext>, Pointer<Void>, Pointer<Void>)
+  >
+  _replyCallback;
+  Pointer<LoopThreadHandle>? _loopThreadHandle;
+  var _closed = false;
+
+  _RedisSubscription._(
+    this._bindings,
+    this._ctx,
+    this._stopFlag,
+    this._replyCallback,
+    this._loopThreadHandle,
+  );
+
   /// Creates a subscription stream that opens a dedicated connection.
   static Stream<RedisPubSubMessage> create(
     String host,
@@ -455,13 +573,11 @@ class _RedisSubscription {
     List<String> patterns,
   ) {
     late StreamController<RedisPubSubMessage> controller;
-    RedisClient? client;
-    RawReceivePort? replyPort;
+    _RedisSubscription? subscription;
 
     controller = StreamController<RedisPubSubMessage>(
-      onListen: () async {
+      onListen: () {
         try {
-          // Open a dedicated connection for this subscription
           final dylib = RedisClient._openLibrary();
           final bindings = HiredisBindings(dylib);
 
@@ -499,51 +615,72 @@ class _RedisSubscription {
                 return;
               }
 
-              // Set up reply port for this subscription
-              replyPort = RawReceivePort(null, 'subscriptionReplyPort')
-                ..keepIsolateAlive = false;
-              final initPort = ReceivePort();
+              final stopFlag = calloc<Bool>();
+              stopFlag.value = false;
 
-              // Start the polling isolate
-              final isolate = await Isolate.spawn(
-                _subscriptionIsolateEntry,
-                _SubscriptionIsolateArgs(
-                  ctxAddress: ctx.address,
-                  replyPort: replyPort!.sendPort,
-                  initPort: initPort.sendPort,
-                  channels: channels,
-                  patterns: patterns,
-                ),
-              );
-
-              // Wait for the isolate to signal it's ready
-              final commandPort = await initPort.first as SendPort;
-              initPort.close();
-
-              // Create a minimal client to hold the connection state
-              client = RedisClient._(
-                host,
-                port,
-                bindings,
-                dylib,
-                commandPort,
-                isolate,
-                replyPort!,
-              );
-
-              // Handle incoming messages
-              replyPort!.handler = (dynamic message) {
+              // Reply callback
+              void onReply(
+                Pointer<redisAsyncContext> ac,
+                Pointer<Void> replyPtr,
+                Pointer<Void> privdata,
+              ) {
+                if (subscription?._closed ?? true) return;
                 if (controller.isClosed) return;
-                if (message is _PubSubMessage) {
-                  final pubsubMsg = RedisPubSubMessage._(
-                    type: message.type,
-                    channel: message.channel,
-                    message: message.payload,
-                    pattern: message.pattern,
-                  );
-                  controller.add(pubsubMsg);
+                if (replyPtr == nullptr) return;
+
+                final reply = replyPtr.cast<redisReply>();
+
+                if (reply.ref.type != REDIS_REPLY_ARRAY ||
+                    reply.ref.elements < 3) {
+                  return;
                 }
-              };
+                final firstElem = reply.ref.element[0];
+                if (firstElem.ref.type != REDIS_REPLY_STRING) {
+                  return;
+                }
+                final type = _parseMessageType(
+                  firstElem.ref.str,
+                  firstElem.ref.len,
+                );
+                final msg = _createPubSubMessage(reply, type);
+                controller.add(msg);
+              }
+
+              final replyCallback =
+                  NativeCallable<
+                    Void Function(
+                      Pointer<redisAsyncContext>,
+                      Pointer<Void>,
+                      Pointer<Void>,
+                    )
+                  >.listener(onReply);
+
+              final loopThreadHandle = bindings.redis_async_start_loop_thread(
+                ctx,
+                stopFlag,
+              );
+
+              if (loopThreadHandle == nullptr) {
+                replyCallback.close();
+                calloc.free(stopFlag);
+                bindings.redisAsyncFree(ctx);
+                controller.addError(
+                  RedisException('Failed to start I/O loop thread'),
+                );
+                return;
+              }
+
+              subscription = _RedisSubscription._(
+                bindings,
+                ctx,
+                stopFlag,
+                replyCallback,
+                loopThreadHandle,
+              );
+
+              // Send SUBSCRIBE and PSUBSCRIBE commands
+              subscription!._sendSubscribeCommand('SUBSCRIBE', channels);
+              subscription!._sendSubscribeCommand('PSUBSCRIBE', patterns);
             } finally {
               calloc.free(hostPtr);
             }
@@ -555,108 +692,15 @@ class _RedisSubscription {
         }
       },
       onCancel: () async {
-        // Close the dedicated connection
-        if (client != null) {
-          await client!.close();
-          client = null;
-        }
-        // Close the stream controller
+        subscription?._close();
         await controller.close();
       },
     );
 
     return controller.stream;
   }
-}
 
-/// Arguments for the subscription isolate.
-class _SubscriptionIsolateArgs {
-  final int ctxAddress;
-  final SendPort replyPort;
-  final SendPort initPort;
-  final List<String> channels;
-  final List<String> patterns;
-
-  _SubscriptionIsolateArgs({
-    required this.ctxAddress,
-    required this.replyPort,
-    required this.initPort,
-    required this.channels,
-    required this.patterns,
-  });
-}
-
-/// Isolate entry point for subscription connections.
-void _subscriptionIsolateEntry(_SubscriptionIsolateArgs args) {
-  final dylib = RedisClient._openLibrary();
-  final bindings = HiredisBindings(dylib);
-  final ctx = Pointer<redisAsyncContext>.fromAddress(args.ctxAddress);
-
-  final commandPort = ReceivePort();
-  args.initPort.send(commandPort.sendPort);
-
-  var running = true;
-
-  // Reply callback - forwards pub/sub messages to the main isolate
-  void onReply(
-    Pointer<redisAsyncContext> ac,
-    Pointer<Void> replyPtr,
-    Pointer<Void> privdata,
-  ) {
-    if (!running) return;
-    if (replyPtr == nullptr) return;
-
-    final reply = replyPtr.cast<redisReply>();
-
-    // Check if this is a pub/sub message
-    if (reply.ref.type == REDIS_REPLY_ARRAY && reply.ref.elements >= 3) {
-      final firstElem = reply.ref.element[0];
-      if (firstElem.ref.type == REDIS_REPLY_STRING) {
-        final typeStr = firstElem.ref.str
-            .cast<Utf8>()
-            .toDartString()
-            .toLowerCase();
-        if (typeStr == 'message' ||
-            typeStr == 'pmessage' ||
-            typeStr == 'subscribe' ||
-            typeStr == 'unsubscribe' ||
-            typeStr == 'psubscribe' ||
-            typeStr == 'punsubscribe') {
-          _handlePubSubReply(args.replyPort, reply, typeStr, bindings);
-        }
-      }
-    }
-  }
-
-  final replyCallback =
-      NativeCallable<
-        Void Function(Pointer<redisAsyncContext>, Pointer<Void>, Pointer<Void>)
-      >.listener(onReply);
-
-  // Allocate stop flag
-  final stopFlag = calloc<Bool>();
-  stopFlag.value = false;
-
-  Pointer<LoopThreadHandle>? loopThreadHandle;
-
-  void cleanup() {
-    running = false;
-    stopFlag.value = true;
-
-    if (loopThreadHandle != null) {
-      bindings.redis_async_stop_loop_thread(loopThreadHandle!);
-      loopThreadHandle = null;
-    }
-
-    bindings.redisAsyncFree(ctx);
-    replyCallback.close();
-    calloc.free(stopFlag);
-    commandPort.close();
-    Isolate.exit();
-  }
-
-  // Send subscribe commands
-  void sendSubscribeCommand(String cmd, List<String> targets) {
+  void _sendSubscribeCommand(String cmd, List<String> targets) {
     if (targets.isEmpty) return;
 
     final argc = targets.length + 1;
@@ -674,16 +718,16 @@ void _subscriptionIsolateEntry(_SubscriptionIsolateArgs args) {
         argvlen[i + 1] = targets[i].length;
       }
 
-      bindings.redisAsyncCommandArgv(
-        ctx,
-        replyCallback.nativeFunction.cast(),
+      _bindings.redisAsyncCommandArgv(
+        _ctx,
+        _replyCallback.nativeFunction.cast(),
         nullptr,
         argc,
         argv,
         argvlen,
       );
 
-      bindings.redis_async_flush(ctx);
+      _bindings.redis_async_flush(_ctx);
     } finally {
       for (var i = 0; i < argc; i++) {
         if (argv[i] != nullptr) {
@@ -695,254 +739,85 @@ void _subscriptionIsolateEntry(_SubscriptionIsolateArgs args) {
     }
   }
 
-  // Listen for shutdown signal
-  commandPort.listen((message) {
-    if (message == null) {
-      cleanup();
-    }
-  });
+  void _close() {
+    if (_closed) return;
+    _closed = true;
 
-  // Start the I/O loop
-  loopThreadHandle = bindings.redis_async_start_loop_thread(ctx, stopFlag);
+    _stopFlag.value = true;
 
-  if (loopThreadHandle == null || loopThreadHandle == nullptr) {
-    replyCallback.close();
-    calloc.free(stopFlag);
-    bindings.redisAsyncFree(ctx);
-    commandPort.close();
-    Isolate.exit();
-  }
-
-  // Send SUBSCRIBE and PSUBSCRIBE commands
-  sendSubscribeCommand('SUBSCRIBE', args.channels);
-  sendSubscribeCommand('PSUBSCRIBE', args.patterns);
-}
-
-// ============ Isolate communication messages ============
-
-class _PollIsolateArgs {
-  final int ctxAddress;
-  final SendPort replyPort;
-  final SendPort initPort;
-
-  _PollIsolateArgs({
-    required this.ctxAddress,
-    required this.replyPort,
-    required this.initPort,
-  });
-}
-
-class _CommandMessage {
-  final int commandId;
-  final List<String> args;
-
-  _CommandMessage(this.commandId, this.args);
-}
-
-class _ReplyMessage {
-  final int commandId;
-  final int replyAddress;
-  final String? error;
-
-  _ReplyMessage(this.commandId, this.replyAddress, this.error);
-}
-
-class _PubSubMessage {
-  final String type;
-  final String channel;
-  final String? payload;
-  final String? pattern;
-
-  _PubSubMessage(this.type, this.channel, this.payload, this.pattern);
-}
-
-// ============ Poll isolate ============
-
-void _pollIsolateEntry(_PollIsolateArgs args) {
-  final dylib = RedisClient._openLibrary();
-  final bindings = HiredisBindings(dylib);
-  final ctx = Pointer<redisAsyncContext>.fromAddress(args.ctxAddress);
-
-  final commandPort = ReceivePort();
-  args.initPort.send(commandPort.sendPort);
-
-  // Map from privdata to command id
-  final pendingCallbacks = <int, int>{};
-  var nextPrivdata = 1;
-  var running = true;
-
-  // Reply callback - called by hiredis when a command completes
-  void onReply(
-    Pointer<redisAsyncContext> ac,
-    Pointer<Void> replyPtr,
-    Pointer<Void> privdata,
-  ) {
-    // Ignore callbacks after shutdown
-    if (!running) return;
-
-    final privdataValue = privdata.address;
-    final commandId = pendingCallbacks.remove(privdataValue);
-
-    if (replyPtr == nullptr) {
-      if (commandId != null) {
-        args.replyPort.send(_ReplyMessage(commandId, 0, 'Null reply'));
-      }
-      return;
+    if (_loopThreadHandle != null) {
+      _bindings.redis_async_stop_loop_thread(_loopThreadHandle!);
+      _loopThreadHandle = null;
     }
 
-    final reply = replyPtr.cast<redisReply>();
-
-    // Check if this is a pub/sub message
-    if (reply.ref.type == REDIS_REPLY_ARRAY && reply.ref.elements >= 3) {
-      final firstElem = reply.ref.element[0];
-      if (firstElem.ref.type == REDIS_REPLY_STRING) {
-        final typeStr = firstElem.ref.str
-            .cast<Utf8>()
-            .toDartString()
-            .toLowerCase();
-        if (typeStr == 'message' ||
-            typeStr == 'pmessage' ||
-            typeStr == 'subscribe' ||
-            typeStr == 'unsubscribe' ||
-            typeStr == 'psubscribe' ||
-            typeStr == 'punsubscribe') {
-          _handlePubSubReply(args.replyPort, reply, typeStr, bindings);
-          if (commandId != null) {
-            args.replyPort.send(
-              _ReplyMessage(commandId, replyPtr.address, null),
-            );
-          }
-          return;
-        }
-      }
-    }
-
-    if (commandId != null) {
-      args.replyPort.send(_ReplyMessage(commandId, replyPtr.address, null));
-    }
-  }
-
-  final replyCallback =
-      NativeCallable<
-        Void Function(Pointer<redisAsyncContext>, Pointer<Void>, Pointer<Void>)
-      >.listener(onReply);
-
-  // Allocate stop flag that Zig will check to know when to exit the loop.
-  final stopFlag = calloc<Bool>();
-  stopFlag.value = false;
-
-  // Handle to the background thread running the I/O loop
-  Pointer<LoopThreadHandle>? loopThreadHandle;
-
-  void cleanup() {
-    running = false;
-
-    // Signal the Zig loop to stop via the shared flag
-    stopFlag.value = true;
-
-    // Stop the background thread and wait for it to exit
-    if (loopThreadHandle != null) {
-      bindings.redis_async_stop_loop_thread(loopThreadHandle!);
-      loopThreadHandle = null;
-    }
-
-    // Free the context
-    bindings.redisAsyncFree(ctx);
-
-    // Close the reply callback
-    replyCallback.close();
-
-    // Free the stop flag
-    calloc.free(stopFlag);
-
-    // Close the command port and exit
-    commandPort.close();
-    Isolate.exit();
-  }
-
-  // Listen for commands from main isolate
-  commandPort.listen((message) {
-    if (message == null) {
-      cleanup();
-      return;
-    }
-
-    if (!running) return;
-
-    if (message is _CommandMessage) {
-      final cmdArgs = message.args;
-      final argc = cmdArgs.length;
-      final argv = calloc<Pointer<Char>>(argc);
-      final argvlen = calloc<Size>(argc);
-
-      try {
-        for (var i = 0; i < argc; i++) {
-          final arg = cmdArgs[i].toNativeUtf8();
-          argv[i] = arg.cast();
-          argvlen[i] = cmdArgs[i].length;
-        }
-
-        final privdata = nextPrivdata++;
-        pendingCallbacks[privdata] = message.commandId;
-
-        bindings.redisAsyncCommandArgv(
-          ctx,
-          replyCallback.nativeFunction.cast(),
-          Pointer<Void>.fromAddress(privdata),
-          argc,
-          argv,
-          argvlen,
-        );
-
-        // Flush to send the command immediately
-        bindings.redis_async_flush(ctx);
-      } finally {
-        for (var i = 0; i < argc; i++) {
-          if (argv[i] != nullptr) {
-            calloc.free(argv[i].cast<Utf8>());
-          }
-        }
-        calloc.free(argv);
-        calloc.free(argvlen);
-      }
-    }
-  });
-
-  // Start the blocking I/O loop on a background thread.
-  // This spawns a native thread that runs the blocking poll loop, leaving
-  // Dart's event loop free to process commands from the main isolate.
-  loopThreadHandle = bindings.redis_async_start_loop_thread(ctx, stopFlag);
-
-  if (loopThreadHandle == null || loopThreadHandle == nullptr) {
-    // Failed to start the loop thread - clean up and exit
-    replyCallback.close();
-    calloc.free(stopFlag);
-    bindings.redisAsyncFree(ctx);
-    commandPort.close();
-    Isolate.exit();
+    _bindings.redisAsyncFree(_ctx);
+    _replyCallback.close();
+    calloc.free(_stopFlag);
   }
 }
 
-void _handlePubSubReply(
-  SendPort replyPort,
+// ============ Helper functions ============
+
+/// Compares a C string pointer against an ASCII string without allocation.
+bool _cStrEquals(Pointer<Char> cstr, int len, String ascii) {
+  if (len != ascii.length) return false;
+  for (var i = 0; i < len; i++) {
+    if (cstr[i] != ascii.codeUnitAt(i)) return false;
+  }
+  return true;
+}
+
+/// Parses a pub/sub message type from a C string.
+/// Since all message type lengths are unique, we only verify content in debug mode.
+RedisPubSubMessageType _parseMessageType(Pointer<Char> str, int len) {
+  RedisPubSubMessageType type = switch (len) {
+    7 => .message,
+    8 => .pmessage,
+    9 => .subscribe,
+    10 => .psubscribe,
+    11 => .unsubscribe,
+    12 => .punsubscribe,
+    _ => throw StateError('Unknown pub/sub message type with length $len'),
+  };
+  assert(_cStrEquals(str, len, type.name));
+  return type;
+}
+
+/// Creates a RedisPubSubMessage from a redisReply with lazy string conversion.
+RedisPubSubMessage _createPubSubMessage(
   Pointer<redisReply> reply,
-  String type,
-  HiredisBindings bindings,
+  RedisPubSubMessageType type,
 ) {
-  String? channel;
-  String? payload;
-  String? pattern;
+  // Channel is always eagerly converted since it's typically accessed
+  String channel = '';
+  Pointer<Char>? messagePtr;
+  int messageLen = 0;
+  Pointer<Char>? patternPtr;
+  int patternLen = 0;
 
-  if (type == 'pmessage' && reply.ref.elements >= 4) {
-    pattern = reply.ref.element[1].ref.str.cast<Utf8>().toDartString();
+  if (type == .pmessage && reply.ref.elements >= 4) {
+    final patternElem = reply.ref.element[1];
+    patternPtr = patternElem.ref.str;
+    patternLen = patternElem.ref.len;
     channel = reply.ref.element[2].ref.str.cast<Utf8>().toDartString();
-    payload = reply.ref.element[3].ref.str.cast<Utf8>().toDartString();
-  } else if (type == 'message' && reply.ref.elements >= 3) {
+    final msgElem = reply.ref.element[3];
+    messagePtr = msgElem.ref.str;
+    messageLen = msgElem.ref.len;
+  } else if (type == .message && reply.ref.elements >= 3) {
     channel = reply.ref.element[1].ref.str.cast<Utf8>().toDartString();
-    payload = reply.ref.element[2].ref.str.cast<Utf8>().toDartString();
+    final msgElem = reply.ref.element[2];
+    messagePtr = msgElem.ref.str;
+    messageLen = msgElem.ref.len;
   } else if (reply.ref.elements >= 2) {
     channel = reply.ref.element[1].ref.str.cast<Utf8>().toDartString();
   }
 
-  replyPort.send(_PubSubMessage(type, channel ?? '', payload, pattern));
+  return RedisPubSubMessage._(
+    type: type,
+    channel: channel,
+    messagePtr: messagePtr,
+    messageLen: messageLen,
+    patternPtr: patternPtr,
+    patternLen: patternLen,
+  );
 }
