@@ -10,11 +10,11 @@ void main() async {
   print('Redis Pub/Sub Example');
   print('=====================\n');
 
-  // Create a pub/sub connection for subscribing
-  final subscriber = RedisPubSub.connect('localhost', 6379);
+  // Create a client for subscribing
+  final subscriber = await RedisClient.connect('localhost', 6379);
 
-  // Create a regular client for publishing
-  final publisher = RedisClient.connect('localhost', 6379);
+  // Create a separate client for publishing (can't publish on a subscribed connection)
+  final publisher = await RedisClient.connect('localhost', 6379);
 
   try {
     // Listen to messages
@@ -29,47 +29,37 @@ void main() async {
 
     // Subscribe to channels
     print('Subscribing to "news" and "alerts" channels...');
-    subscriber.subscribe('news');
-    subscriber.subscribe('alerts');
+    await subscriber.subscribe(['news', 'alerts']);
 
     // Subscribe to a pattern
     print('Subscribing to pattern "user:*"...\n');
-    subscriber.psubscribe('user:*');
+    await subscriber.psubscribe(['user:*']);
 
     // Give some time for subscriptions to be processed
     await Future<void>.delayed(const Duration(milliseconds: 100));
 
-    // Poll to process subscription confirmations
-    subscriber.poll();
-
     // Publish some messages
     print('Publishing messages...\n');
 
-    publisher.commandArgv(['PUBLISH', 'news', 'Breaking: Dart 3.10 released!']);
+    await publisher.publish('news', 'Breaking: Dart 3.10 released!');
     await Future<void>.delayed(const Duration(milliseconds: 50));
-    subscriber.poll();
 
-    publisher.commandArgv(['PUBLISH', 'alerts', 'System maintenance tonight']);
+    await publisher.publish('alerts', 'System maintenance tonight');
     await Future<void>.delayed(const Duration(milliseconds: 50));
-    subscriber.poll();
 
-    publisher.commandArgv(['PUBLISH', 'user:123', 'User 123 logged in']);
+    await publisher.publish('user:123', 'User 123 logged in');
     await Future<void>.delayed(const Duration(milliseconds: 50));
-    subscriber.poll();
 
-    publisher.commandArgv(['PUBLISH', 'user:456', 'User 456 updated profile']);
+    await publisher.publish('user:456', 'User 456 updated profile');
     await Future<void>.delayed(const Duration(milliseconds: 50));
-    subscriber.poll();
 
-    // Wait a bit for any remaining messages
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-    subscriber.poll();
+    // Wait a bit for messages to be received
+    await Future<void>.delayed(const Duration(milliseconds: 200));
 
     // Unsubscribe
     print('Unsubscribing from "news"...');
-    subscriber.unsubscribe('news');
+    await subscriber.unsubscribe(['news']);
     await Future<void>.delayed(const Duration(milliseconds: 50));
-    subscriber.poll();
 
     // Cancel the stream subscription
     await subscription.cancel();
@@ -78,7 +68,7 @@ void main() async {
   } on RedisException catch (e) {
     print('Redis error: $e');
   } finally {
-    subscriber.close();
-    publisher.close();
+    await subscriber.close();
+    await publisher.close();
   }
 }

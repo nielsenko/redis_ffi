@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
     const upstream_dep = hiredict_dep.builder.dependency("hiredict", .{});
     const upstream_path = upstream_dep.path(".");
 
-    const source_files = &[_][]const u8{
+    const hiredict_source_files = &[_][]const u8{
         "alloc.c",
         "async.c",
         "hiredict.c",
@@ -23,29 +23,33 @@ pub fn build(b: *std.Build) void {
 
     const cflags = &[_][]const u8{"-std=c99"};
 
-    // Build shared library for FFI
-    const shared_lib = b.addSharedLibrary(.{
-        .name = "hiredis",
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-
-    shared_lib.addCSourceFiles(.{
-        .root = upstream_path,
-        .files = source_files,
-        .flags = cflags,
-    });
-
-    shared_lib.addIncludePath(upstream_path);
-
-    // Platform-specific libraries and linker flags
+    // Platform-specific libraries
     const platform_libs: []const []const u8 = switch (target.result.os.tag) {
         .windows => &.{ "ws2_32", "crypt32" },
         .freebsd => &.{"m"},
         .solaris => &.{"socket"},
         else => &.{},
     };
+
+    // Build shared library for FFI
+    const shared_lib = b.addSharedLibrary(.{
+        .name = "hiredis",
+        .root_source_file = b.path("src/async_loop.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+
+    // Add hiredict C sources
+    shared_lib.addCSourceFiles(.{
+        .root = upstream_path,
+        .files = hiredict_source_files,
+        .flags = cflags,
+    });
+
+    // Include paths for both hiredict headers and our Zig code
+    shared_lib.addIncludePath(upstream_path);
+
     for (platform_libs) |libname| {
         shared_lib.linkSystemLibrary(libname);
     }
@@ -75,6 +79,7 @@ pub fn build(b: *std.Build) void {
     // Also build static library
     const static_lib = b.addStaticLibrary(.{
         .name = "hiredis",
+        .root_source_file = b.path("src/async_loop.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -82,7 +87,7 @@ pub fn build(b: *std.Build) void {
 
     static_lib.addCSourceFiles(.{
         .root = upstream_path,
-        .files = source_files,
+        .files = hiredict_source_files,
         .flags = cflags,
     });
 

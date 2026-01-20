@@ -3,10 +3,7 @@ import 'package:test/test.dart';
 
 void main() {
   group('RedisPubSubMessage', () {
-    test('toString includes all fields for regular message', () {
-      // We can't easily create RedisPubSubMessage directly since it requires
-      // a RedisReply, but we can at least test the string representation
-      // by checking the class exists and exports are correct
+    test('class is exported', () {
       expect(RedisPubSubMessage, isNotNull);
     });
   });
@@ -37,97 +34,122 @@ void main() {
   group('RedisClient integration', () {
     late RedisClient client;
 
-    setUp(() {
+    setUp(() async {
       try {
-        client = RedisClient.connect('localhost', 6379);
+        client = await RedisClient.connect('localhost', 6379);
       } on RedisException {
-        // Skip tests if Redis is not available
+        markTestSkipped('Redis server not available');
+      } on StateError {
         markTestSkipped('Redis server not available');
       }
     });
 
-    tearDown(() {
+    tearDown(() async {
       try {
-        client.close();
+        await client.close();
       } catch (_) {
         // Ignore errors during cleanup
       }
     });
 
-    test('ping returns PONG', () {
-      expect(client.ping(), equals('PONG'));
+    test('ping returns PONG', () async {
+      expect(await client.ping(), equals('PONG'));
     });
 
-    test('ping with message returns message', () {
-      expect(client.ping('hello'), equals('hello'));
+    test('ping with message returns message', () async {
+      expect(await client.ping('hello'), equals('hello'));
     });
 
-    test('set and get work correctly', () {
-      client.set('test_key', 'test_value');
-      expect(client.get('test_key'), equals('test_value'));
+    test('set and get work correctly', () async {
+      await client.set('test_key', 'test_value');
+      expect(await client.get('test_key'), equals('test_value'));
 
       // Cleanup
-      client.del(['test_key']);
+      await client.del(['test_key']);
     });
 
-    test('get returns null for non-existent key', () {
-      expect(client.get('non_existent_key_12345'), isNull);
+    test('get returns null for non-existent key', () async {
+      expect(await client.get('non_existent_key_12345'), isNull);
     });
 
-    test('exists returns correct value', () {
-      client.set('exists_test', 'value');
-      expect(client.exists('exists_test'), isTrue);
-      expect(client.exists('non_existent_key_12345'), isFalse);
+    test('exists returns correct value', () async {
+      await client.set('exists_test', 'value');
+      expect(await client.exists('exists_test'), isTrue);
+      expect(await client.exists('non_existent_key_12345'), isFalse);
 
       // Cleanup
-      client.del(['exists_test']);
+      await client.del(['exists_test']);
     });
 
-    test('del deletes keys', () {
-      client.set('del_test1', 'value1');
-      client.set('del_test2', 'value2');
+    test('del deletes keys', () async {
+      await client.set('del_test1', 'value1');
+      await client.set('del_test2', 'value2');
 
-      final deleted = client.del(['del_test1', 'del_test2']);
+      final deleted = await client.del(['del_test1', 'del_test2']);
       expect(deleted, equals(2));
-      expect(client.exists('del_test1'), isFalse);
-      expect(client.exists('del_test2'), isFalse);
+      expect(await client.exists('del_test1'), isFalse);
+      expect(await client.exists('del_test2'), isFalse);
     });
 
-    test('commandArgv works with array reply', () {
-      client.set('array_test1', 'value1');
-      client.set('array_test2', 'value2');
+    test('command works with array reply', () async {
+      await client.set('array_test1', 'value1');
+      await client.set('array_test2', 'value2');
 
-      final reply = client.commandArgv(['MGET', 'array_test1', 'array_test2']);
-      expect(reply.type, equals(RedisReplyType.array));
-      expect(reply.length, equals(2));
-      expect(reply[0]?.string, equals('value1'));
-      expect(reply[1]?.string, equals('value2'));
-      reply.free();
+      final reply = await client.command([
+        'MGET',
+        'array_test1',
+        'array_test2',
+      ]);
+      expect(reply?.type, equals(RedisReplyType.array));
+      expect(reply?.length, equals(2));
+      expect(reply?[0]?.string, equals('value1'));
+      expect(reply?[1]?.string, equals('value2'));
+      reply?.free();
 
       // Cleanup
-      client.del(['array_test1', 'array_test2']);
+      await client.del(['array_test1', 'array_test2']);
+    });
+
+    test('pipeline executes multiple commands', () async {
+      final results = await client.pipeline([
+        ['SET', 'pipe1', 'value1'],
+        ['SET', 'pipe2', 'value2'],
+        ['GET', 'pipe1'],
+        ['GET', 'pipe2'],
+      ]);
+
+      expect(results.length, equals(4));
+      expect(results[2]?.string, equals('value1'));
+      expect(results[3]?.string, equals('value2'));
+
+      for (final reply in results) {
+        reply?.free();
+      }
+
+      // Cleanup
+      await client.del(['pipe1', 'pipe2']);
     });
   }, skip: 'Requires running Redis server');
 
-  group('RedisPubSub integration', () {
-    late RedisPubSub subscriber;
+  group('RedisClient pub/sub integration', () {
+    late RedisClient subscriber;
     late RedisClient publisher;
 
-    setUp(() {
+    setUp(() async {
       try {
-        subscriber = RedisPubSub.connect('localhost', 6379);
-        publisher = RedisClient.connect('localhost', 6379);
-      } on StateError {
-        markTestSkipped('Redis server not available');
+        subscriber = await RedisClient.connect('localhost', 6379);
+        publisher = await RedisClient.connect('localhost', 6379);
       } on RedisException {
+        markTestSkipped('Redis server not available');
+      } on StateError {
         markTestSkipped('Redis server not available');
       }
     });
 
-    tearDown(() {
+    tearDown(() async {
       try {
-        subscriber.close();
-        publisher.close();
+        await subscriber.close();
+        await publisher.close();
       } catch (_) {
         // Ignore errors during cleanup
       }
@@ -137,18 +159,16 @@ void main() {
       final messages = <RedisPubSubMessage>[];
       final subscription = subscriber.messages.listen(messages.add);
 
-      subscriber.subscribe('test-channel');
+      await subscriber.subscribe(['test-channel']);
 
       // Wait for subscription to be processed
       await Future<void>.delayed(const Duration(milliseconds: 100));
-      subscriber.poll();
 
       // Publish a message
-      publisher.commandArgv(['PUBLISH', 'test-channel', 'hello']);
+      await publisher.publish('test-channel', 'hello');
 
-      // Wait and poll for the message
+      // Wait for the message
       await Future<void>.delayed(const Duration(milliseconds: 100));
-      subscriber.poll();
 
       await subscription.cancel();
 
@@ -160,54 +180,27 @@ void main() {
       final messages = <RedisPubSubMessage>[];
       final subscription = subscriber.messages.listen(messages.add);
 
-      subscriber.psubscribe('test:*');
+      await subscriber.psubscribe(['test:*']);
 
       // Wait for subscription
       await Future<void>.delayed(const Duration(milliseconds: 100));
-      subscriber.poll();
 
       // Publish to matching channel
-      publisher.commandArgv(['PUBLISH', 'test:foo', 'pattern message']);
+      await publisher.publish('test:foo', 'pattern message');
 
-      // Wait and poll
+      // Wait for message
       await Future<void>.delayed(const Duration(milliseconds: 100));
-      subscriber.poll();
 
       await subscription.cancel();
 
       expect(messages.length, greaterThanOrEqualTo(1));
     });
 
-    test('unsubscribe stops receiving messages', () async {
-      final messages = <RedisPubSubMessage>[];
-      final subscription = subscriber.messages.listen(messages.add);
+    test('close stops the client', () async {
+      await subscriber.subscribe(['close-test']);
+      await subscriber.close();
 
-      subscriber.subscribe('unsub-test');
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      subscriber.poll();
-
-      subscriber.unsubscribe('unsub-test');
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      subscriber.poll();
-
-      final countAfterUnsub = messages.length;
-
-      // Publish after unsubscribe - should not receive
-      publisher.commandArgv(['PUBLISH', 'unsub-test', 'should not receive']);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      subscriber.poll();
-
-      await subscription.cancel();
-
-      // Message count should not have increased (beyond possible unsub confirmation)
-      expect(messages.length, lessThanOrEqualTo(countAfterUnsub + 1));
-    });
-
-    test('close stops the subscriber', () {
-      subscriber.subscribe('close-test');
-      subscriber.close();
-
-      expect(() => subscriber.subscribe('another'), throwsStateError);
+      expect(() => subscriber.command(['PING']), throwsStateError);
     });
   }, skip: 'Requires running Redis server');
 }

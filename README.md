@@ -2,12 +2,12 @@
 
 A Dart FFI wrapper for [hiredis](https://github.com/redis/hiredis), the minimalistic C client for Redis.
 
-This package provides high-performance Redis client functionality using direct FFI bindings to the hiredis C library, with proper memory management using Dart's `NativeFinalizer`.
+This package provides high-performance async Redis client functionality using direct FFI bindings to the hiredis C library, with a custom Zig-based polling loop for non-blocking I/O.
 
 ## Features
 
-- Synchronous Redis client with common operations (GET, SET, DEL, EXISTS, PING)
-- Raw command execution with full reply parsing
+- Fully async API with Future-based operations
+- Automatic command pipelining for maximum throughput
 - Pub/Sub support with Dart Stream API
 - Automatic memory management via `NativeFinalizer`
 - Prebuilt binaries for all major platforms (no native toolchain required for users)
@@ -31,39 +31,59 @@ No additional setup is required - prebuilt native libraries are bundled with the
 ```dart
 import 'package:redis_ffi/redis_ffi.dart';
 
-void main() {
-  final client = RedisClient.connect('localhost', 6379);
+void main() async {
+  final client = await RedisClient.connect('localhost', 6379);
 
   try {
     // Test connection
-    print(client.ping()); // PONG
+    print(await client.ping()); // PONG
 
     // Set and get values
-    client.set('greeting', 'Hello, Redis!');
-    print(client.get('greeting')); // Hello, Redis!
+    await client.set('greeting', 'Hello, Redis!');
+    print(await client.get('greeting')); // Hello, Redis!
 
     // Check existence
-    print(client.exists('greeting')); // true
+    print(await client.exists('greeting')); // true
 
     // Delete keys
-    client.del(['greeting']);
+    await client.del(['greeting']);
   } finally {
-    client.close();
+    await client.close();
   }
 }
 ```
 
 ### Raw Commands
 
-For commands not covered by the convenience methods, use `commandArgv`:
+For commands not covered by the convenience methods, use `command`:
 
 ```dart
-final reply = client.commandArgv(['MGET', 'key1', 'key2', 'key3']);
-print(reply.type); // RedisReplyType.array
-for (var i = 0; i < reply.length; i++) {
-  print(reply[i]?.string);
+final reply = await client.command(['MGET', 'key1', 'key2', 'key3']);
+print(reply?.type); // RedisReplyType.array
+for (var i = 0; i < (reply?.length ?? 0); i++) {
+  print(reply?[i]?.string);
 }
-reply.free(); // Optional - will be freed automatically by NativeFinalizer
+reply?.free(); // Optional - will be freed automatically by NativeFinalizer
+```
+
+### Pipelining
+
+Send multiple commands at once for better throughput:
+
+```dart
+final results = await client.pipeline([
+  ['SET', 'key1', 'value1'],
+  ['SET', 'key2', 'value2'],
+  ['GET', 'key1'],
+  ['GET', 'key2'],
+]);
+
+print(results[2]?.string); // value1
+print(results[3]?.string); // value2
+
+for (final reply in results) {
+  reply?.free();
+}
 ```
 
 ### Pub/Sub
@@ -72,8 +92,11 @@ reply.free(); // Optional - will be freed automatically by NativeFinalizer
 import 'package:redis_ffi/redis_ffi.dart';
 
 void main() async {
-  final subscriber = RedisPubSub.connect('localhost', 6379);
-  final publisher = RedisClient.connect('localhost', 6379);
+  // Subscriber connection
+  final subscriber = await RedisClient.connect('localhost', 6379);
+  
+  // Publisher connection (can't publish on a subscribed connection)
+  final publisher = await RedisClient.connect('localhost', 6379);
 
   try {
     // Listen to messages
@@ -83,33 +106,37 @@ void main() async {
     });
 
     // Subscribe to channels
-    subscriber.subscribe('news');
-    subscriber.psubscribe('user:*'); // Pattern subscription
+    await subscriber.subscribe(['news']);
+    await subscriber.psubscribe(['user:*']); // Pattern subscription
 
-    // Poll for messages (call periodically)
-    subscriber.poll();
-
-    // Publish from another client
-    publisher.commandArgv(['PUBLISH', 'news', 'Breaking news!']);
-
-    // Poll to receive
-    await Future.delayed(Duration(milliseconds: 100));
-    subscriber.poll();
+    // Publish messages
+    await publisher.publish('news', 'Breaking news!');
+    await publisher.publish('user:123', 'User logged in');
 
   } finally {
-    subscriber.close();
-    publisher.close();
+    await subscriber.close();
+    await publisher.close();
   }
 }
 ```
+
+## Architecture
+
+This package uses a hybrid approach for async I/O:
+
+1. **Hiredis async API** - Commands are sent using hiredis's non-blocking async interface
+2. **Zig polling loop** - A custom Zig function (`redis_async_poll`) efficiently waits for socket I/O
+3. **Dart isolate** - The polling runs in a separate isolate, keeping the main isolate responsive
+4. **NativeCallable.listener** - Callbacks from native code post directly to Dart's event loop
+
+This design provides true async behavior without busy-polling, while maintaining compatibility with Dart's single-threaded async model.
 
 ## Memory Management
 
 This package uses Dart's `NativeFinalizer` to automatically free native resources when Dart objects are garbage collected. However, for optimal performance:
 
-- Call `client.close()` when done with a `RedisClient`
-- Call `subscriber.close()` when done with a `RedisPubSub`
-- Optionally call `reply.free()` on `RedisReply` objects if you want immediate cleanup
+- Call `await client.close()` when done with a `RedisClient`
+- Optionally call `reply?.free()` on `RedisReply` objects if you want immediate cleanup
 
 The package uses hiredis options (`REDICT_OPT_NOAUTOFREE`, `REDICT_OPT_NOAUTOFREEREPLIES`, `REDICT_OPT_NO_PUSH_AUTOFREE`) to ensure Dart has full control over memory lifetime.
 
@@ -135,7 +162,7 @@ dart run tool/build_all.dart
 dart run tool/build_all.dart macos-arm64
 
 # Regenerate FFI bindings
-dart run ffigen
+dart run ffigen --config ffigen.yaml
 ```
 
 ### Target Platforms

@@ -1702,6 +1702,95 @@ class HiredisBindings {
           int,
         )
       >();
+
+  /// Polls the Redis async context for I/O readiness and handles events.
+  ///
+  /// This function blocks until:
+  /// - Data is available to read
+  /// - The socket is ready for writing (and we have data to write)
+  /// - The timeout expires
+  /// - An error occurs
+  ///
+  /// @param ctx The async context to poll.
+  /// @param timeout_ms Timeout in milliseconds. Use -1 for infinite wait.
+  /// @return Poll result code.
+  RedisPollResult redis_async_poll(
+    ffi.Pointer<redictAsyncContext> ctx,
+    int timeout_ms,
+  ) {
+    return RedisPollResult.fromValue(_redis_async_poll(ctx, timeout_ms));
+  }
+
+  late final _redis_async_pollPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Int Function(ffi.Pointer<redictAsyncContext>, ffi.Int)
+        >
+      >('redis_async_poll');
+  late final _redis_async_poll = _redis_async_pollPtr
+      .asFunction<int Function(ffi.Pointer<redictAsyncContext>, int)>();
+
+  /// Starts a polling loop in the current thread.
+  ///
+  /// This function runs until:
+  /// - The context is disconnected
+  /// - An unrecoverable error occurs
+  ///
+  /// @param ctx The async context to run the loop for.
+  /// @param poll_interval_ms Timeout for each poll iteration.
+  void redis_async_run_loop(
+    ffi.Pointer<redictAsyncContext> ctx,
+    int poll_interval_ms,
+  ) {
+    return _redis_async_run_loop(ctx, poll_interval_ms);
+  }
+
+  late final _redis_async_run_loopPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(ffi.Pointer<redictAsyncContext>, ffi.Int)
+        >
+      >('redis_async_run_loop');
+  late final _redis_async_run_loop = _redis_async_run_loopPtr
+      .asFunction<void Function(ffi.Pointer<redictAsyncContext>, int)>();
+
+  /// Gets the file descriptor from an async context.
+  /// @return The fd, or -1 if the context is null or disconnected.
+  int redis_async_get_fd(ffi.Pointer<redictAsyncContext> ctx) {
+    return _redis_async_get_fd(ctx);
+  }
+
+  late final _redis_async_get_fdPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Int Function(ffi.Pointer<redictAsyncContext>)>
+      >('redis_async_get_fd');
+  late final _redis_async_get_fd = _redis_async_get_fdPtr
+      .asFunction<int Function(ffi.Pointer<redictAsyncContext>)>();
+
+  /// Checks if the async context is connected.
+  /// @return true if connected, false otherwise.
+  bool redis_async_is_connected(ffi.Pointer<redictAsyncContext> ctx) {
+    return _redis_async_is_connected(ctx);
+  }
+
+  late final _redis_async_is_connectedPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Bool Function(ffi.Pointer<redictAsyncContext>)>
+      >('redis_async_is_connected');
+  late final _redis_async_is_connected = _redis_async_is_connectedPtr
+      .asFunction<bool Function(ffi.Pointer<redictAsyncContext>)>();
+
+  /// Forces a write flush - sends any pending commands immediately.
+  void redis_async_flush(ffi.Pointer<redictAsyncContext> ctx) {
+    return _redis_async_flush(ctx);
+  }
+
+  late final _redis_async_flushPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictAsyncContext>)>
+      >('redis_async_flush');
+  late final _redis_async_flush = _redis_async_flushPtr
+      .asFunction<void Function(ffi.Pointer<redictAsyncContext>)>();
 }
 
 final class redictReadTask extends ffi.Struct {
@@ -2211,6 +2300,25 @@ typedef redictTimerCallback =
         ffi.Pointer<ffi.Void> privdata,
       )
     >;
+
+/// Result of a poll operation.
+enum RedisPollResult {
+  REDIS_POLL_TIMEOUT(0),
+  REDIS_POLL_ACTIVITY(1),
+  REDIS_POLL_ERROR(-1),
+  REDIS_POLL_CLOSED(-2);
+
+  final int value;
+  const RedisPollResult(this.value);
+
+  static RedisPollResult fromValue(int value) => switch (value) {
+    0 => REDIS_POLL_TIMEOUT,
+    1 => REDIS_POLL_ACTIVITY,
+    -1 => REDIS_POLL_ERROR,
+    -2 => REDIS_POLL_CLOSED,
+    _ => throw ArgumentError('Unknown value for RedisPollResult: $value'),
+  };
+}
 
 const int REDICT_ERR = -1;
 

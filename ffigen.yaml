@@ -5,21 +5,24 @@ headers:
   entry-points:
     - native/lib/macos-x64/include/hiredict.h
     - native/lib/macos-x64/include/async.h
+    - native/src/async_loop.h
   include-directives:
     - native/lib/macos-x64/include/hiredict.h
     - native/lib/macos-x64/include/async.h
     - native/lib/macos-x64/include/read.h
     - native/lib/macos-x64/include/sds.h
     - native/lib/macos-x64/include/alloc.h
+    - native/src/async_loop.h
 compiler-opts:
   - "-Inative/lib/macos-x64/include"
 
-# Include all redict functions
+# Include all redict functions and our async loop functions
 functions:
   include:
     - "redict.*"
     - "freeReplyObject"
     - "sds.*"
+    - "redis_async_.*"
 
 # Include relevant structs
 structs:
@@ -40,3 +43,4 @@ macros:
   include:
     - "REDICT_.*"
     - "HIREDICT_.*"
+    - "REDIS_POLL_.*"
