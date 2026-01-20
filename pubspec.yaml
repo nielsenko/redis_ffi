@@ -1,15 +1,17 @@
 name: redis_ffi
-description: A starting point for Dart libraries or applications.
+description: A Dart FFI wrapper for hiredis, the minimalistic C client for Redis.
 version: 1.0.0
-# repository: https://github.com/my_org/my_repo
+repository: https://github.com/serverpod/redis_ffi
 
 environment:
-  sdk: ^3.10.7
+  sdk: ^3.10.0
 
-# Add regular dependencies here.
 dependencies:
-  # path: ^1.9.0
+  ffi: ^2.1.0
 
 dev_dependencies:
+  code_assets: ^1.0.0
+  hooks: ^1.0.0
+  ffigen: ^20.0.0
   lints: ^6.0.0
-  test: ^1.25.6
+  test: ^1.25.0
