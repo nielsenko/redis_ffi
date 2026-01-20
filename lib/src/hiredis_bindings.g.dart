@@ -4,7 +4,7 @@
 // ignore_for_file: type=lint, unused_import
 import 'dart:ffi' as ffi;
 
-/// FFI bindings for hiredict (hiredis fork) C library
+/// FFI bindings for hiredis C library
 class HiredisBindings {
   /// Holds the symbol lookup function.
   final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName)
@@ -19,82 +19,82 @@ class HiredisBindings {
     ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName) lookup,
   ) : _lookup = lookup;
 
-  ffi.Pointer<redictReader> redictReaderCreateWithFunctions(
-    ffi.Pointer<redictReplyObjectFunctions> fn,
+  ffi.Pointer<redisReader> redisReaderCreateWithFunctions(
+    ffi.Pointer<redisReplyObjectFunctions> fn,
   ) {
-    return _redictReaderCreateWithFunctions(fn);
+    return _redisReaderCreateWithFunctions(fn);
   }
 
-  late final _redictReaderCreateWithFunctionsPtr =
+  late final _redisReaderCreateWithFunctionsPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictReader> Function(
-            ffi.Pointer<redictReplyObjectFunctions>,
+          ffi.Pointer<redisReader> Function(
+            ffi.Pointer<redisReplyObjectFunctions>,
           )
         >
-      >('redictReaderCreateWithFunctions');
-  late final _redictReaderCreateWithFunctions =
-      _redictReaderCreateWithFunctionsPtr
+      >('redisReaderCreateWithFunctions');
+  late final _redisReaderCreateWithFunctions =
+      _redisReaderCreateWithFunctionsPtr
           .asFunction<
-            ffi.Pointer<redictReader> Function(
-              ffi.Pointer<redictReplyObjectFunctions>,
+            ffi.Pointer<redisReader> Function(
+              ffi.Pointer<redisReplyObjectFunctions>,
             )
           >();
 
-  void redictReaderFree(ffi.Pointer<redictReader> r) {
-    return _redictReaderFree(r);
+  void redisReaderFree(ffi.Pointer<redisReader> r) {
+    return _redisReaderFree(r);
   }
 
-  late final _redictReaderFreePtr =
-      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictReader>)>>(
-        'redictReaderFree',
+  late final _redisReaderFreePtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisReader>)>>(
+        'redisReaderFree',
       );
-  late final _redictReaderFree = _redictReaderFreePtr
-      .asFunction<void Function(ffi.Pointer<redictReader>)>();
+  late final _redisReaderFree = _redisReaderFreePtr
+      .asFunction<void Function(ffi.Pointer<redisReader>)>();
 
-  int redictReaderFeed(
-    ffi.Pointer<redictReader> r,
+  int redisReaderFeed(
+    ffi.Pointer<redisReader> r,
     ffi.Pointer<ffi.Char> buf,
     int len,
   ) {
-    return _redictReaderFeed(r, buf, len);
+    return _redisReaderFeed(r, buf, len);
   }
 
-  late final _redictReaderFeedPtr =
+  late final _redisReaderFeedPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictReader>,
+            ffi.Pointer<redisReader>,
             ffi.Pointer<ffi.Char>,
             ffi.Size,
           )
         >
-      >('redictReaderFeed');
-  late final _redictReaderFeed = _redictReaderFeedPtr
+      >('redisReaderFeed');
+  late final _redisReaderFeed = _redisReaderFeedPtr
       .asFunction<
-        int Function(ffi.Pointer<redictReader>, ffi.Pointer<ffi.Char>, int)
+        int Function(ffi.Pointer<redisReader>, ffi.Pointer<ffi.Char>, int)
       >();
 
-  int redictReaderGetReply(
-    ffi.Pointer<redictReader> r,
+  int redisReaderGetReply(
+    ffi.Pointer<redisReader> r,
     ffi.Pointer<ffi.Pointer<ffi.Void>> reply,
   ) {
-    return _redictReaderGetReply(r, reply);
+    return _redisReaderGetReply(r, reply);
   }
 
-  late final _redictReaderGetReplyPtr =
+  late final _redisReaderGetReplyPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictReader>,
+            ffi.Pointer<redisReader>,
             ffi.Pointer<ffi.Pointer<ffi.Void>>,
           )
         >
-      >('redictReaderGetReply');
-  late final _redictReaderGetReply = _redictReaderGetReplyPtr
+      >('redisReaderGetReply');
+  late final _redisReaderGetReply = _redisReaderGetReplyPtr
       .asFunction<
         int Function(
-          ffi.Pointer<redictReader>,
+          ffi.Pointer<redisReader>,
           ffi.Pointer<ffi.Pointer<ffi.Void>>,
         )
       >();
@@ -557,21 +557,21 @@ class HiredisBindings {
   late final _sds_free = _sds_freePtr
       .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
-  late final ffi.Pointer<hiredictAllocFuncs> _hiredictAllocFns =
-      _lookup<hiredictAllocFuncs>('hiredictAllocFns');
+  late final ffi.Pointer<hiredisAllocFuncs> _hiredisAllocFns =
+      _lookup<hiredisAllocFuncs>('hiredisAllocFns');
 
-  hiredictAllocFuncs get hiredictAllocFns => _hiredictAllocFns.ref;
+  hiredisAllocFuncs get hiredisAllocFns => _hiredisAllocFns.ref;
 
-  ffi.Pointer<redictReader> redictReaderCreate() {
-    return _redictReaderCreate();
+  ffi.Pointer<redisReader> redisReaderCreate() {
+    return _redisReaderCreate();
   }
 
-  late final _redictReaderCreatePtr =
-      _lookup<ffi.NativeFunction<ffi.Pointer<redictReader> Function()>>(
-        'redictReaderCreate',
+  late final _redisReaderCreatePtr =
+      _lookup<ffi.NativeFunction<ffi.Pointer<redisReader> Function()>>(
+        'redisReaderCreate',
       );
-  late final _redictReaderCreate = _redictReaderCreatePtr
-      .asFunction<ffi.Pointer<redictReader> Function()>();
+  late final _redisReaderCreate = _redisReaderCreatePtr
+      .asFunction<ffi.Pointer<redisReader> Function()>();
 
   void freeReplyObject(ffi.Pointer<ffi.Void> reply) {
     return _freeReplyObject(reply);
@@ -584,15 +584,15 @@ class HiredisBindings {
   late final _freeReplyObject = _freeReplyObjectPtr
       .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
-  int redictvFormatCommand(
+  int redisvFormatCommand(
     ffi.Pointer<ffi.Pointer<ffi.Char>> target,
     ffi.Pointer<ffi.Char> format,
     ffi.Pointer<__va_list_tag> ap,
   ) {
-    return _redictvFormatCommand(target, format, ap);
+    return _redisvFormatCommand(target, format, ap);
   }
 
-  late final _redictvFormatCommandPtr =
+  late final _redisvFormatCommandPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
@@ -601,8 +601,8 @@ class HiredisBindings {
             ffi.Pointer<__va_list_tag>,
           )
         >
-      >('redictvFormatCommand');
-  late final _redictvFormatCommand = _redictvFormatCommandPtr
+      >('redisvFormatCommand');
+  late final _redisvFormatCommand = _redisvFormatCommandPtr
       .asFunction<
         int Function(
           ffi.Pointer<ffi.Pointer<ffi.Char>>,
@@ -611,14 +611,14 @@ class HiredisBindings {
         )
       >();
 
-  int redictFormatCommand(
+  int redisFormatCommand(
     ffi.Pointer<ffi.Pointer<ffi.Char>> target,
     ffi.Pointer<ffi.Char> format,
   ) {
-    return _redictFormatCommand(target, format);
+    return _redisFormatCommand(target, format);
   }
 
-  late final _redictFormatCommandPtr =
+  late final _redisFormatCommandPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
@@ -626,22 +626,22 @@ class HiredisBindings {
             ffi.Pointer<ffi.Char>,
           )
         >
-      >('redictFormatCommand');
-  late final _redictFormatCommand = _redictFormatCommandPtr
+      >('redisFormatCommand');
+  late final _redisFormatCommand = _redisFormatCommandPtr
       .asFunction<
         int Function(ffi.Pointer<ffi.Pointer<ffi.Char>>, ffi.Pointer<ffi.Char>)
       >();
 
-  int redictFormatCommandArgv(
+  int redisFormatCommandArgv(
     ffi.Pointer<ffi.Pointer<ffi.Char>> target,
     int argc,
     ffi.Pointer<ffi.Pointer<ffi.Char>> argv,
     ffi.Pointer<ffi.Size> argvlen,
   ) {
-    return _redictFormatCommandArgv(target, argc, argv, argvlen);
+    return _redisFormatCommandArgv(target, argc, argv, argvlen);
   }
 
-  late final _redictFormatCommandArgvPtr =
+  late final _redisFormatCommandArgvPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.LongLong Function(
@@ -651,8 +651,8 @@ class HiredisBindings {
             ffi.Pointer<ffi.Size>,
           )
         >
-      >('redictFormatCommandArgv');
-  late final _redictFormatCommandArgv = _redictFormatCommandArgvPtr
+      >('redisFormatCommandArgv');
+  late final _redisFormatCommandArgv = _redisFormatCommandArgvPtr
       .asFunction<
         int Function(
           ffi.Pointer<ffi.Pointer<ffi.Char>>,
@@ -662,16 +662,16 @@ class HiredisBindings {
         )
       >();
 
-  int redictFormatSdsCommandArgv(
+  int redisFormatSdsCommandArgv(
     ffi.Pointer<sds> target,
     int argc,
     ffi.Pointer<ffi.Pointer<ffi.Char>> argv,
     ffi.Pointer<ffi.Size> argvlen,
   ) {
-    return _redictFormatSdsCommandArgv(target, argc, argv, argvlen);
+    return _redisFormatSdsCommandArgv(target, argc, argv, argvlen);
   }
 
-  late final _redictFormatSdsCommandArgvPtr =
+  late final _redisFormatSdsCommandArgvPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.LongLong Function(
@@ -681,8 +681,8 @@ class HiredisBindings {
             ffi.Pointer<ffi.Size>,
           )
         >
-      >('redictFormatSdsCommandArgv');
-  late final _redictFormatSdsCommandArgv = _redictFormatSdsCommandArgvPtr
+      >('redisFormatSdsCommandArgv');
+  late final _redisFormatSdsCommandArgv = _redisFormatSdsCommandArgvPtr
       .asFunction<
         int Function(
           ffi.Pointer<sds>,
@@ -692,212 +692,212 @@ class HiredisBindings {
         )
       >();
 
-  void redictFreeCommand(ffi.Pointer<ffi.Char> cmd) {
-    return _redictFreeCommand(cmd);
+  void redisFreeCommand(ffi.Pointer<ffi.Char> cmd) {
+    return _redisFreeCommand(cmd);
   }
 
-  late final _redictFreeCommandPtr =
+  late final _redisFreeCommandPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Char>)>>(
-        'redictFreeCommand',
+        'redisFreeCommand',
       );
-  late final _redictFreeCommand = _redictFreeCommandPtr
+  late final _redisFreeCommand = _redisFreeCommandPtr
       .asFunction<void Function(ffi.Pointer<ffi.Char>)>();
 
-  void redictFreeSdsCommand(sds cmd) {
-    return _redictFreeSdsCommand(cmd);
+  void redisFreeSdsCommand(sds cmd) {
+    return _redisFreeSdsCommand(cmd);
   }
 
-  late final _redictFreeSdsCommandPtr =
+  late final _redisFreeSdsCommandPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(sds)>>(
-        'redictFreeSdsCommand',
+        'redisFreeSdsCommand',
       );
-  late final _redictFreeSdsCommand = _redictFreeSdsCommandPtr
+  late final _redisFreeSdsCommand = _redisFreeSdsCommandPtr
       .asFunction<void Function(sds)>();
 
-  ffi.Pointer<redictContext> redictConnectWithOptions(
-    ffi.Pointer<redictOptions> options,
+  ffi.Pointer<redisContext> redisConnectWithOptions(
+    ffi.Pointer<redisOptions> options,
   ) {
-    return _redictConnectWithOptions(options);
+    return _redisConnectWithOptions(options);
   }
 
-  late final _redictConnectWithOptionsPtr =
+  late final _redisConnectWithOptionsPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictContext> Function(ffi.Pointer<redictOptions>)
+          ffi.Pointer<redisContext> Function(ffi.Pointer<redisOptions>)
         >
-      >('redictConnectWithOptions');
-  late final _redictConnectWithOptions = _redictConnectWithOptionsPtr
+      >('redisConnectWithOptions');
+  late final _redisConnectWithOptions = _redisConnectWithOptionsPtr
       .asFunction<
-        ffi.Pointer<redictContext> Function(ffi.Pointer<redictOptions>)
+        ffi.Pointer<redisContext> Function(ffi.Pointer<redisOptions>)
       >();
 
-  ffi.Pointer<redictContext> redictConnect(ffi.Pointer<ffi.Char> ip, int port) {
-    return _redictConnect(ip, port);
+  ffi.Pointer<redisContext> redisConnect(ffi.Pointer<ffi.Char> ip, int port) {
+    return _redisConnect(ip, port);
   }
 
-  late final _redictConnectPtr =
+  late final _redisConnectPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictContext> Function(ffi.Pointer<ffi.Char>, ffi.Int)
+          ffi.Pointer<redisContext> Function(ffi.Pointer<ffi.Char>, ffi.Int)
         >
-      >('redictConnect');
-  late final _redictConnect = _redictConnectPtr
+      >('redisConnect');
+  late final _redisConnect = _redisConnectPtr
       .asFunction<
-        ffi.Pointer<redictContext> Function(ffi.Pointer<ffi.Char>, int)
+        ffi.Pointer<redisContext> Function(ffi.Pointer<ffi.Char>, int)
       >();
 
-  ffi.Pointer<redictContext> redictConnectWithTimeout(
+  ffi.Pointer<redisContext> redisConnectWithTimeout(
     ffi.Pointer<ffi.Char> ip,
     int port,
     timeval tv,
   ) {
-    return _redictConnectWithTimeout(ip, port, tv);
+    return _redisConnectWithTimeout(ip, port, tv);
   }
 
-  late final _redictConnectWithTimeoutPtr =
+  late final _redisConnectWithTimeoutPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictContext> Function(
+          ffi.Pointer<redisContext> Function(
             ffi.Pointer<ffi.Char>,
             ffi.Int,
             timeval,
           )
         >
-      >('redictConnectWithTimeout');
-  late final _redictConnectWithTimeout = _redictConnectWithTimeoutPtr
+      >('redisConnectWithTimeout');
+  late final _redisConnectWithTimeout = _redisConnectWithTimeoutPtr
       .asFunction<
-        ffi.Pointer<redictContext> Function(ffi.Pointer<ffi.Char>, int, timeval)
+        ffi.Pointer<redisContext> Function(ffi.Pointer<ffi.Char>, int, timeval)
       >();
 
-  ffi.Pointer<redictContext> redictConnectNonBlock(
+  ffi.Pointer<redisContext> redisConnectNonBlock(
     ffi.Pointer<ffi.Char> ip,
     int port,
   ) {
-    return _redictConnectNonBlock(ip, port);
+    return _redisConnectNonBlock(ip, port);
   }
 
-  late final _redictConnectNonBlockPtr =
+  late final _redisConnectNonBlockPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictContext> Function(ffi.Pointer<ffi.Char>, ffi.Int)
+          ffi.Pointer<redisContext> Function(ffi.Pointer<ffi.Char>, ffi.Int)
         >
-      >('redictConnectNonBlock');
-  late final _redictConnectNonBlock = _redictConnectNonBlockPtr
+      >('redisConnectNonBlock');
+  late final _redisConnectNonBlock = _redisConnectNonBlockPtr
       .asFunction<
-        ffi.Pointer<redictContext> Function(ffi.Pointer<ffi.Char>, int)
+        ffi.Pointer<redisContext> Function(ffi.Pointer<ffi.Char>, int)
       >();
 
-  ffi.Pointer<redictContext> redictConnectBindNonBlock(
+  ffi.Pointer<redisContext> redisConnectBindNonBlock(
     ffi.Pointer<ffi.Char> ip,
     int port,
     ffi.Pointer<ffi.Char> source_addr,
   ) {
-    return _redictConnectBindNonBlock(ip, port, source_addr);
+    return _redisConnectBindNonBlock(ip, port, source_addr);
   }
 
-  late final _redictConnectBindNonBlockPtr =
+  late final _redisConnectBindNonBlockPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictContext> Function(
+          ffi.Pointer<redisContext> Function(
             ffi.Pointer<ffi.Char>,
             ffi.Int,
             ffi.Pointer<ffi.Char>,
           )
         >
-      >('redictConnectBindNonBlock');
-  late final _redictConnectBindNonBlock = _redictConnectBindNonBlockPtr
+      >('redisConnectBindNonBlock');
+  late final _redisConnectBindNonBlock = _redisConnectBindNonBlockPtr
       .asFunction<
-        ffi.Pointer<redictContext> Function(
+        ffi.Pointer<redisContext> Function(
           ffi.Pointer<ffi.Char>,
           int,
           ffi.Pointer<ffi.Char>,
         )
       >();
 
-  ffi.Pointer<redictContext> redictConnectBindNonBlockWithReuse(
+  ffi.Pointer<redisContext> redisConnectBindNonBlockWithReuse(
     ffi.Pointer<ffi.Char> ip,
     int port,
     ffi.Pointer<ffi.Char> source_addr,
   ) {
-    return _redictConnectBindNonBlockWithReuse(ip, port, source_addr);
+    return _redisConnectBindNonBlockWithReuse(ip, port, source_addr);
   }
 
-  late final _redictConnectBindNonBlockWithReusePtr =
+  late final _redisConnectBindNonBlockWithReusePtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictContext> Function(
+          ffi.Pointer<redisContext> Function(
             ffi.Pointer<ffi.Char>,
             ffi.Int,
             ffi.Pointer<ffi.Char>,
           )
         >
-      >('redictConnectBindNonBlockWithReuse');
-  late final _redictConnectBindNonBlockWithReuse =
-      _redictConnectBindNonBlockWithReusePtr
+      >('redisConnectBindNonBlockWithReuse');
+  late final _redisConnectBindNonBlockWithReuse =
+      _redisConnectBindNonBlockWithReusePtr
           .asFunction<
-            ffi.Pointer<redictContext> Function(
+            ffi.Pointer<redisContext> Function(
               ffi.Pointer<ffi.Char>,
               int,
               ffi.Pointer<ffi.Char>,
             )
           >();
 
-  ffi.Pointer<redictContext> redictConnectUnix(ffi.Pointer<ffi.Char> path) {
-    return _redictConnectUnix(path);
+  ffi.Pointer<redisContext> redisConnectUnix(ffi.Pointer<ffi.Char> path) {
+    return _redisConnectUnix(path);
   }
 
-  late final _redictConnectUnixPtr =
+  late final _redisConnectUnixPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictContext> Function(ffi.Pointer<ffi.Char>)
+          ffi.Pointer<redisContext> Function(ffi.Pointer<ffi.Char>)
         >
-      >('redictConnectUnix');
-  late final _redictConnectUnix = _redictConnectUnixPtr
-      .asFunction<ffi.Pointer<redictContext> Function(ffi.Pointer<ffi.Char>)>();
+      >('redisConnectUnix');
+  late final _redisConnectUnix = _redisConnectUnixPtr
+      .asFunction<ffi.Pointer<redisContext> Function(ffi.Pointer<ffi.Char>)>();
 
-  ffi.Pointer<redictContext> redictConnectUnixWithTimeout(
+  ffi.Pointer<redisContext> redisConnectUnixWithTimeout(
     ffi.Pointer<ffi.Char> path,
     timeval tv,
   ) {
-    return _redictConnectUnixWithTimeout(path, tv);
+    return _redisConnectUnixWithTimeout(path, tv);
   }
 
-  late final _redictConnectUnixWithTimeoutPtr =
+  late final _redisConnectUnixWithTimeoutPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictContext> Function(ffi.Pointer<ffi.Char>, timeval)
+          ffi.Pointer<redisContext> Function(ffi.Pointer<ffi.Char>, timeval)
         >
-      >('redictConnectUnixWithTimeout');
-  late final _redictConnectUnixWithTimeout = _redictConnectUnixWithTimeoutPtr
+      >('redisConnectUnixWithTimeout');
+  late final _redisConnectUnixWithTimeout = _redisConnectUnixWithTimeoutPtr
       .asFunction<
-        ffi.Pointer<redictContext> Function(ffi.Pointer<ffi.Char>, timeval)
+        ffi.Pointer<redisContext> Function(ffi.Pointer<ffi.Char>, timeval)
       >();
 
-  ffi.Pointer<redictContext> redictConnectUnixNonBlock(
+  ffi.Pointer<redisContext> redisConnectUnixNonBlock(
     ffi.Pointer<ffi.Char> path,
   ) {
-    return _redictConnectUnixNonBlock(path);
+    return _redisConnectUnixNonBlock(path);
   }
 
-  late final _redictConnectUnixNonBlockPtr =
+  late final _redisConnectUnixNonBlockPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictContext> Function(ffi.Pointer<ffi.Char>)
+          ffi.Pointer<redisContext> Function(ffi.Pointer<ffi.Char>)
         >
-      >('redictConnectUnixNonBlock');
-  late final _redictConnectUnixNonBlock = _redictConnectUnixNonBlockPtr
-      .asFunction<ffi.Pointer<redictContext> Function(ffi.Pointer<ffi.Char>)>();
+      >('redisConnectUnixNonBlock');
+  late final _redisConnectUnixNonBlock = _redisConnectUnixNonBlockPtr
+      .asFunction<ffi.Pointer<redisContext> Function(ffi.Pointer<ffi.Char>)>();
 
-  ffi.Pointer<redictContext> redictConnectFd(int fd) {
-    return _redictConnectFd(fd);
+  ffi.Pointer<redisContext> redisConnectFd(int fd) {
+    return _redisConnectFd(fd);
   }
 
-  late final _redictConnectFdPtr =
-      _lookup<
-        ffi.NativeFunction<ffi.Pointer<redictContext> Function(redictFD)>
-      >('redictConnectFd');
-  late final _redictConnectFd = _redictConnectFdPtr
-      .asFunction<ffi.Pointer<redictContext> Function(int)>();
+  late final _redisConnectFdPtr =
+      _lookup<ffi.NativeFunction<ffi.Pointer<redisContext> Function(redisFD)>>(
+        'redisConnectFd',
+      );
+  late final _redisConnectFd = _redisConnectFdPtr
+      .asFunction<ffi.Pointer<redisContext> Function(int)>();
 
   /// Reconnect the given context using the saved information.
   ///
@@ -905,764 +905,757 @@ class HiredisBindings {
   /// host, ip (or path), timeout and bind address are reused,
   /// flags are used unmodified from the existing context.
   ///
-  /// Returns REDICT_OK on successful connect or REDICT_ERR otherwise.
-  int redictReconnect(ffi.Pointer<redictContext> c) {
-    return _redictReconnect(c);
+  /// Returns REDIS_OK on successful connect or REDIS_ERR otherwise.
+  int redisReconnect(ffi.Pointer<redisContext> c) {
+    return _redisReconnect(c);
   }
 
-  late final _redictReconnectPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<redictContext>)>>(
-        'redictReconnect',
+  late final _redisReconnectPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<redisContext>)>>(
+        'redisReconnect',
       );
-  late final _redictReconnect = _redictReconnectPtr
-      .asFunction<int Function(ffi.Pointer<redictContext>)>();
+  late final _redisReconnect = _redisReconnectPtr
+      .asFunction<int Function(ffi.Pointer<redisContext>)>();
 
-  ffi.Pointer<redictPushFn> redictSetPushCallback(
-    ffi.Pointer<redictContext> c,
-    ffi.Pointer<redictPushFn> fn,
+  ffi.Pointer<redisPushFn> redisSetPushCallback(
+    ffi.Pointer<redisContext> c,
+    ffi.Pointer<redisPushFn> fn,
   ) {
-    return _redictSetPushCallback(c, fn);
+    return _redisSetPushCallback(c, fn);
   }
 
-  late final _redictSetPushCallbackPtr =
+  late final _redisSetPushCallbackPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictPushFn> Function(
-            ffi.Pointer<redictContext>,
-            ffi.Pointer<redictPushFn>,
+          ffi.Pointer<redisPushFn> Function(
+            ffi.Pointer<redisContext>,
+            ffi.Pointer<redisPushFn>,
           )
         >
-      >('redictSetPushCallback');
-  late final _redictSetPushCallback = _redictSetPushCallbackPtr
+      >('redisSetPushCallback');
+  late final _redisSetPushCallback = _redisSetPushCallbackPtr
       .asFunction<
-        ffi.Pointer<redictPushFn> Function(
-          ffi.Pointer<redictContext>,
-          ffi.Pointer<redictPushFn>,
+        ffi.Pointer<redisPushFn> Function(
+          ffi.Pointer<redisContext>,
+          ffi.Pointer<redisPushFn>,
         )
       >();
 
-  int redictSetTimeout(ffi.Pointer<redictContext> c, timeval tv) {
-    return _redictSetTimeout(c, tv);
+  int redisSetTimeout(ffi.Pointer<redisContext> c, timeval tv) {
+    return _redisSetTimeout(c, tv);
   }
 
-  late final _redictSetTimeoutPtr =
+  late final _redisSetTimeoutPtr =
       _lookup<
-        ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<redictContext>, timeval)
-        >
-      >('redictSetTimeout');
-  late final _redictSetTimeout = _redictSetTimeoutPtr
-      .asFunction<int Function(ffi.Pointer<redictContext>, timeval)>();
+        ffi.NativeFunction<ffi.Int Function(ffi.Pointer<redisContext>, timeval)>
+      >('redisSetTimeout');
+  late final _redisSetTimeout = _redisSetTimeoutPtr
+      .asFunction<int Function(ffi.Pointer<redisContext>, timeval)>();
 
-  int redictEnableKeepAlive(ffi.Pointer<redictContext> c) {
-    return _redictEnableKeepAlive(c);
+  int redisEnableKeepAlive(ffi.Pointer<redisContext> c) {
+    return _redisEnableKeepAlive(c);
   }
 
-  late final _redictEnableKeepAlivePtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<redictContext>)>>(
-        'redictEnableKeepAlive',
+  late final _redisEnableKeepAlivePtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<redisContext>)>>(
+        'redisEnableKeepAlive',
       );
-  late final _redictEnableKeepAlive = _redictEnableKeepAlivePtr
-      .asFunction<int Function(ffi.Pointer<redictContext>)>();
+  late final _redisEnableKeepAlive = _redisEnableKeepAlivePtr
+      .asFunction<int Function(ffi.Pointer<redisContext>)>();
 
-  int redictEnableKeepAliveWithInterval(
-    ffi.Pointer<redictContext> c,
+  int redisEnableKeepAliveWithInterval(
+    ffi.Pointer<redisContext> c,
     int interval,
   ) {
-    return _redictEnableKeepAliveWithInterval(c, interval);
+    return _redisEnableKeepAliveWithInterval(c, interval);
   }
 
-  late final _redictEnableKeepAliveWithIntervalPtr =
+  late final _redisEnableKeepAliveWithIntervalPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Int Function(ffi.Pointer<redisContext>, ffi.Int)>
+      >('redisEnableKeepAliveWithInterval');
+  late final _redisEnableKeepAliveWithInterval =
+      _redisEnableKeepAliveWithIntervalPtr
+          .asFunction<int Function(ffi.Pointer<redisContext>, int)>();
+
+  int redisSetTcpUserTimeout(ffi.Pointer<redisContext> c, int timeout) {
+    return _redisSetTcpUserTimeout(c, timeout);
+  }
+
+  late final _redisSetTcpUserTimeoutPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<redictContext>, ffi.Int)
+          ffi.Int Function(ffi.Pointer<redisContext>, ffi.UnsignedInt)
         >
-      >('redictEnableKeepAliveWithInterval');
-  late final _redictEnableKeepAliveWithInterval =
-      _redictEnableKeepAliveWithIntervalPtr
-          .asFunction<int Function(ffi.Pointer<redictContext>, int)>();
+      >('redisSetTcpUserTimeout');
+  late final _redisSetTcpUserTimeout = _redisSetTcpUserTimeoutPtr
+      .asFunction<int Function(ffi.Pointer<redisContext>, int)>();
 
-  int redictSetTcpUserTimeout(ffi.Pointer<redictContext> c, int timeout) {
-    return _redictSetTcpUserTimeout(c, timeout);
+  void redisFree(ffi.Pointer<redisContext> c) {
+    return _redisFree(c);
   }
 
-  late final _redictSetTcpUserTimeoutPtr =
-      _lookup<
-        ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<redictContext>, ffi.UnsignedInt)
-        >
-      >('redictSetTcpUserTimeout');
-  late final _redictSetTcpUserTimeout = _redictSetTcpUserTimeoutPtr
-      .asFunction<int Function(ffi.Pointer<redictContext>, int)>();
-
-  void redictFree(ffi.Pointer<redictContext> c) {
-    return _redictFree(c);
-  }
-
-  late final _redictFreePtr =
-      _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictContext>)>
-      >('redictFree');
-  late final _redictFree = _redictFreePtr
-      .asFunction<void Function(ffi.Pointer<redictContext>)>();
-
-  int redictFreeKeepFd(ffi.Pointer<redictContext> c) {
-    return _redictFreeKeepFd(c);
-  }
-
-  late final _redictFreeKeepFdPtr =
-      _lookup<
-        ffi.NativeFunction<redictFD Function(ffi.Pointer<redictContext>)>
-      >('redictFreeKeepFd');
-  late final _redictFreeKeepFd = _redictFreeKeepFdPtr
-      .asFunction<int Function(ffi.Pointer<redictContext>)>();
-
-  int redictBufferRead(ffi.Pointer<redictContext> c) {
-    return _redictBufferRead(c);
-  }
-
-  late final _redictBufferReadPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<redictContext>)>>(
-        'redictBufferRead',
+  late final _redisFreePtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisContext>)>>(
+        'redisFree',
       );
-  late final _redictBufferRead = _redictBufferReadPtr
-      .asFunction<int Function(ffi.Pointer<redictContext>)>();
+  late final _redisFree = _redisFreePtr
+      .asFunction<void Function(ffi.Pointer<redisContext>)>();
 
-  int redictBufferWrite(
-    ffi.Pointer<redictContext> c,
-    ffi.Pointer<ffi.Int> done,
-  ) {
-    return _redictBufferWrite(c, done);
+  int redisFreeKeepFd(ffi.Pointer<redisContext> c) {
+    return _redisFreeKeepFd(c);
   }
 
-  late final _redictBufferWritePtr =
+  late final _redisFreeKeepFdPtr =
+      _lookup<ffi.NativeFunction<redisFD Function(ffi.Pointer<redisContext>)>>(
+        'redisFreeKeepFd',
+      );
+  late final _redisFreeKeepFd = _redisFreeKeepFdPtr
+      .asFunction<int Function(ffi.Pointer<redisContext>)>();
+
+  int redisBufferRead(ffi.Pointer<redisContext> c) {
+    return _redisBufferRead(c);
+  }
+
+  late final _redisBufferReadPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<redisContext>)>>(
+        'redisBufferRead',
+      );
+  late final _redisBufferRead = _redisBufferReadPtr
+      .asFunction<int Function(ffi.Pointer<redisContext>)>();
+
+  int redisBufferWrite(ffi.Pointer<redisContext> c, ffi.Pointer<ffi.Int> done) {
+    return _redisBufferWrite(c, done);
+  }
+
+  late final _redisBufferWritePtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<redictContext>, ffi.Pointer<ffi.Int>)
+          ffi.Int Function(ffi.Pointer<redisContext>, ffi.Pointer<ffi.Int>)
         >
-      >('redictBufferWrite');
-  late final _redictBufferWrite = _redictBufferWritePtr
+      >('redisBufferWrite');
+  late final _redisBufferWrite = _redisBufferWritePtr
       .asFunction<
-        int Function(ffi.Pointer<redictContext>, ffi.Pointer<ffi.Int>)
+        int Function(ffi.Pointer<redisContext>, ffi.Pointer<ffi.Int>)
       >();
 
-  int redictGetReply(
-    ffi.Pointer<redictContext> c,
+  int redisGetReply(
+    ffi.Pointer<redisContext> c,
     ffi.Pointer<ffi.Pointer<ffi.Void>> reply,
   ) {
-    return _redictGetReply(c, reply);
+    return _redisGetReply(c, reply);
   }
 
-  late final _redictGetReplyPtr =
+  late final _redisGetReplyPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictContext>,
+            ffi.Pointer<redisContext>,
             ffi.Pointer<ffi.Pointer<ffi.Void>>,
           )
         >
-      >('redictGetReply');
-  late final _redictGetReply = _redictGetReplyPtr
+      >('redisGetReply');
+  late final _redisGetReply = _redisGetReplyPtr
       .asFunction<
         int Function(
-          ffi.Pointer<redictContext>,
+          ffi.Pointer<redisContext>,
           ffi.Pointer<ffi.Pointer<ffi.Void>>,
         )
       >();
 
-  int redictGetReplyFromReader(
-    ffi.Pointer<redictContext> c,
+  int redisGetReplyFromReader(
+    ffi.Pointer<redisContext> c,
     ffi.Pointer<ffi.Pointer<ffi.Void>> reply,
   ) {
-    return _redictGetReplyFromReader(c, reply);
+    return _redisGetReplyFromReader(c, reply);
   }
 
-  late final _redictGetReplyFromReaderPtr =
+  late final _redisGetReplyFromReaderPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictContext>,
+            ffi.Pointer<redisContext>,
             ffi.Pointer<ffi.Pointer<ffi.Void>>,
           )
         >
-      >('redictGetReplyFromReader');
-  late final _redictGetReplyFromReader = _redictGetReplyFromReaderPtr
+      >('redisGetReplyFromReader');
+  late final _redisGetReplyFromReader = _redisGetReplyFromReaderPtr
       .asFunction<
         int Function(
-          ffi.Pointer<redictContext>,
+          ffi.Pointer<redisContext>,
           ffi.Pointer<ffi.Pointer<ffi.Void>>,
         )
       >();
 
-  int redictAppendFormattedCommand(
-    ffi.Pointer<redictContext> c,
+  int redisAppendFormattedCommand(
+    ffi.Pointer<redisContext> c,
     ffi.Pointer<ffi.Char> cmd,
     int len,
   ) {
-    return _redictAppendFormattedCommand(c, cmd, len);
+    return _redisAppendFormattedCommand(c, cmd, len);
   }
 
-  late final _redictAppendFormattedCommandPtr =
+  late final _redisAppendFormattedCommandPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictContext>,
+            ffi.Pointer<redisContext>,
             ffi.Pointer<ffi.Char>,
             ffi.Size,
           )
         >
-      >('redictAppendFormattedCommand');
-  late final _redictAppendFormattedCommand = _redictAppendFormattedCommandPtr
+      >('redisAppendFormattedCommand');
+  late final _redisAppendFormattedCommand = _redisAppendFormattedCommandPtr
       .asFunction<
-        int Function(ffi.Pointer<redictContext>, ffi.Pointer<ffi.Char>, int)
+        int Function(ffi.Pointer<redisContext>, ffi.Pointer<ffi.Char>, int)
       >();
 
-  int redictvAppendCommand(
-    ffi.Pointer<redictContext> c,
+  int redisvAppendCommand(
+    ffi.Pointer<redisContext> c,
     ffi.Pointer<ffi.Char> format,
     ffi.Pointer<__va_list_tag> ap,
   ) {
-    return _redictvAppendCommand(c, format, ap);
+    return _redisvAppendCommand(c, format, ap);
   }
 
-  late final _redictvAppendCommandPtr =
+  late final _redisvAppendCommandPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictContext>,
+            ffi.Pointer<redisContext>,
             ffi.Pointer<ffi.Char>,
             ffi.Pointer<__va_list_tag>,
           )
         >
-      >('redictvAppendCommand');
-  late final _redictvAppendCommand = _redictvAppendCommandPtr
+      >('redisvAppendCommand');
+  late final _redisvAppendCommand = _redisvAppendCommandPtr
       .asFunction<
         int Function(
-          ffi.Pointer<redictContext>,
+          ffi.Pointer<redisContext>,
           ffi.Pointer<ffi.Char>,
           ffi.Pointer<__va_list_tag>,
         )
       >();
 
-  int redictAppendCommand(
-    ffi.Pointer<redictContext> c,
+  int redisAppendCommand(
+    ffi.Pointer<redisContext> c,
     ffi.Pointer<ffi.Char> format,
   ) {
-    return _redictAppendCommand(c, format);
+    return _redisAppendCommand(c, format);
   }
 
-  late final _redictAppendCommandPtr =
+  late final _redisAppendCommandPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<redictContext>, ffi.Pointer<ffi.Char>)
+          ffi.Int Function(ffi.Pointer<redisContext>, ffi.Pointer<ffi.Char>)
         >
-      >('redictAppendCommand');
-  late final _redictAppendCommand = _redictAppendCommandPtr
+      >('redisAppendCommand');
+  late final _redisAppendCommand = _redisAppendCommandPtr
       .asFunction<
-        int Function(ffi.Pointer<redictContext>, ffi.Pointer<ffi.Char>)
+        int Function(ffi.Pointer<redisContext>, ffi.Pointer<ffi.Char>)
       >();
 
-  int redictAppendCommandArgv(
-    ffi.Pointer<redictContext> c,
+  int redisAppendCommandArgv(
+    ffi.Pointer<redisContext> c,
     int argc,
     ffi.Pointer<ffi.Pointer<ffi.Char>> argv,
     ffi.Pointer<ffi.Size> argvlen,
   ) {
-    return _redictAppendCommandArgv(c, argc, argv, argvlen);
+    return _redisAppendCommandArgv(c, argc, argv, argvlen);
   }
 
-  late final _redictAppendCommandArgvPtr =
+  late final _redisAppendCommandArgvPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictContext>,
+            ffi.Pointer<redisContext>,
             ffi.Int,
             ffi.Pointer<ffi.Pointer<ffi.Char>>,
             ffi.Pointer<ffi.Size>,
           )
         >
-      >('redictAppendCommandArgv');
-  late final _redictAppendCommandArgv = _redictAppendCommandArgvPtr
+      >('redisAppendCommandArgv');
+  late final _redisAppendCommandArgv = _redisAppendCommandArgvPtr
       .asFunction<
         int Function(
-          ffi.Pointer<redictContext>,
+          ffi.Pointer<redisContext>,
           int,
           ffi.Pointer<ffi.Pointer<ffi.Char>>,
           ffi.Pointer<ffi.Size>,
         )
       >();
 
-  ffi.Pointer<ffi.Void> redictvCommand(
-    ffi.Pointer<redictContext> c,
+  ffi.Pointer<ffi.Void> redisvCommand(
+    ffi.Pointer<redisContext> c,
     ffi.Pointer<ffi.Char> format,
     ffi.Pointer<__va_list_tag> ap,
   ) {
-    return _redictvCommand(c, format, ap);
+    return _redisvCommand(c, format, ap);
   }
 
-  late final _redictvCommandPtr =
+  late final _redisvCommandPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Pointer<ffi.Void> Function(
-            ffi.Pointer<redictContext>,
+            ffi.Pointer<redisContext>,
             ffi.Pointer<ffi.Char>,
             ffi.Pointer<__va_list_tag>,
           )
         >
-      >('redictvCommand');
-  late final _redictvCommand = _redictvCommandPtr
+      >('redisvCommand');
+  late final _redisvCommand = _redisvCommandPtr
       .asFunction<
         ffi.Pointer<ffi.Void> Function(
-          ffi.Pointer<redictContext>,
+          ffi.Pointer<redisContext>,
           ffi.Pointer<ffi.Char>,
           ffi.Pointer<__va_list_tag>,
         )
       >();
 
-  ffi.Pointer<ffi.Void> redictCommand(
-    ffi.Pointer<redictContext> c,
+  ffi.Pointer<ffi.Void> redisCommand(
+    ffi.Pointer<redisContext> c,
     ffi.Pointer<ffi.Char> format,
   ) {
-    return _redictCommand(c, format);
+    return _redisCommand(c, format);
   }
 
-  late final _redictCommandPtr =
+  late final _redisCommandPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Pointer<ffi.Void> Function(
-            ffi.Pointer<redictContext>,
+            ffi.Pointer<redisContext>,
             ffi.Pointer<ffi.Char>,
           )
         >
-      >('redictCommand');
-  late final _redictCommand = _redictCommandPtr
+      >('redisCommand');
+  late final _redisCommand = _redisCommandPtr
       .asFunction<
         ffi.Pointer<ffi.Void> Function(
-          ffi.Pointer<redictContext>,
+          ffi.Pointer<redisContext>,
           ffi.Pointer<ffi.Char>,
         )
       >();
 
-  ffi.Pointer<ffi.Void> redictCommandArgv(
-    ffi.Pointer<redictContext> c,
+  ffi.Pointer<ffi.Void> redisCommandArgv(
+    ffi.Pointer<redisContext> c,
     int argc,
     ffi.Pointer<ffi.Pointer<ffi.Char>> argv,
     ffi.Pointer<ffi.Size> argvlen,
   ) {
-    return _redictCommandArgv(c, argc, argv, argvlen);
+    return _redisCommandArgv(c, argc, argv, argvlen);
   }
 
-  late final _redictCommandArgvPtr =
+  late final _redisCommandArgvPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Pointer<ffi.Void> Function(
-            ffi.Pointer<redictContext>,
+            ffi.Pointer<redisContext>,
             ffi.Int,
             ffi.Pointer<ffi.Pointer<ffi.Char>>,
             ffi.Pointer<ffi.Size>,
           )
         >
-      >('redictCommandArgv');
-  late final _redictCommandArgv = _redictCommandArgvPtr
+      >('redisCommandArgv');
+  late final _redisCommandArgv = _redisCommandArgvPtr
       .asFunction<
         ffi.Pointer<ffi.Void> Function(
-          ffi.Pointer<redictContext>,
+          ffi.Pointer<redisContext>,
           int,
           ffi.Pointer<ffi.Pointer<ffi.Char>>,
           ffi.Pointer<ffi.Size>,
         )
       >();
 
-  ffi.Pointer<redictAsyncContext> redictAsyncConnectWithOptions(
-    ffi.Pointer<redictOptions> options,
+  ffi.Pointer<redisAsyncContext> redisAsyncConnectWithOptions(
+    ffi.Pointer<redisOptions> options,
   ) {
-    return _redictAsyncConnectWithOptions(options);
+    return _redisAsyncConnectWithOptions(options);
   }
 
-  late final _redictAsyncConnectWithOptionsPtr =
+  late final _redisAsyncConnectWithOptionsPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictAsyncContext> Function(ffi.Pointer<redictOptions>)
+          ffi.Pointer<redisAsyncContext> Function(ffi.Pointer<redisOptions>)
         >
-      >('redictAsyncConnectWithOptions');
-  late final _redictAsyncConnectWithOptions = _redictAsyncConnectWithOptionsPtr
+      >('redisAsyncConnectWithOptions');
+  late final _redisAsyncConnectWithOptions = _redisAsyncConnectWithOptionsPtr
       .asFunction<
-        ffi.Pointer<redictAsyncContext> Function(ffi.Pointer<redictOptions>)
+        ffi.Pointer<redisAsyncContext> Function(ffi.Pointer<redisOptions>)
       >();
 
-  ffi.Pointer<redictAsyncContext> redictAsyncConnect(
+  ffi.Pointer<redisAsyncContext> redisAsyncConnect(
     ffi.Pointer<ffi.Char> ip,
     int port,
   ) {
-    return _redictAsyncConnect(ip, port);
+    return _redisAsyncConnect(ip, port);
   }
 
-  late final _redictAsyncConnectPtr =
+  late final _redisAsyncConnectPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictAsyncContext> Function(
+          ffi.Pointer<redisAsyncContext> Function(
             ffi.Pointer<ffi.Char>,
             ffi.Int,
           )
         >
-      >('redictAsyncConnect');
-  late final _redictAsyncConnect = _redictAsyncConnectPtr
+      >('redisAsyncConnect');
+  late final _redisAsyncConnect = _redisAsyncConnectPtr
       .asFunction<
-        ffi.Pointer<redictAsyncContext> Function(ffi.Pointer<ffi.Char>, int)
+        ffi.Pointer<redisAsyncContext> Function(ffi.Pointer<ffi.Char>, int)
       >();
 
-  ffi.Pointer<redictAsyncContext> redictAsyncConnectBind(
+  ffi.Pointer<redisAsyncContext> redisAsyncConnectBind(
     ffi.Pointer<ffi.Char> ip,
     int port,
     ffi.Pointer<ffi.Char> source_addr,
   ) {
-    return _redictAsyncConnectBind(ip, port, source_addr);
+    return _redisAsyncConnectBind(ip, port, source_addr);
   }
 
-  late final _redictAsyncConnectBindPtr =
+  late final _redisAsyncConnectBindPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictAsyncContext> Function(
+          ffi.Pointer<redisAsyncContext> Function(
             ffi.Pointer<ffi.Char>,
             ffi.Int,
             ffi.Pointer<ffi.Char>,
           )
         >
-      >('redictAsyncConnectBind');
-  late final _redictAsyncConnectBind = _redictAsyncConnectBindPtr
+      >('redisAsyncConnectBind');
+  late final _redisAsyncConnectBind = _redisAsyncConnectBindPtr
       .asFunction<
-        ffi.Pointer<redictAsyncContext> Function(
+        ffi.Pointer<redisAsyncContext> Function(
           ffi.Pointer<ffi.Char>,
           int,
           ffi.Pointer<ffi.Char>,
         )
       >();
 
-  ffi.Pointer<redictAsyncContext> redictAsyncConnectBindWithReuse(
+  ffi.Pointer<redisAsyncContext> redisAsyncConnectBindWithReuse(
     ffi.Pointer<ffi.Char> ip,
     int port,
     ffi.Pointer<ffi.Char> source_addr,
   ) {
-    return _redictAsyncConnectBindWithReuse(ip, port, source_addr);
+    return _redisAsyncConnectBindWithReuse(ip, port, source_addr);
   }
 
-  late final _redictAsyncConnectBindWithReusePtr =
+  late final _redisAsyncConnectBindWithReusePtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictAsyncContext> Function(
+          ffi.Pointer<redisAsyncContext> Function(
             ffi.Pointer<ffi.Char>,
             ffi.Int,
             ffi.Pointer<ffi.Char>,
           )
         >
-      >('redictAsyncConnectBindWithReuse');
-  late final _redictAsyncConnectBindWithReuse =
-      _redictAsyncConnectBindWithReusePtr
+      >('redisAsyncConnectBindWithReuse');
+  late final _redisAsyncConnectBindWithReuse =
+      _redisAsyncConnectBindWithReusePtr
           .asFunction<
-            ffi.Pointer<redictAsyncContext> Function(
+            ffi.Pointer<redisAsyncContext> Function(
               ffi.Pointer<ffi.Char>,
               int,
               ffi.Pointer<ffi.Char>,
             )
           >();
 
-  ffi.Pointer<redictAsyncContext> redictAsyncConnectUnix(
+  ffi.Pointer<redisAsyncContext> redisAsyncConnectUnix(
     ffi.Pointer<ffi.Char> path,
   ) {
-    return _redictAsyncConnectUnix(path);
+    return _redisAsyncConnectUnix(path);
   }
 
-  late final _redictAsyncConnectUnixPtr =
+  late final _redisAsyncConnectUnixPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictAsyncContext> Function(ffi.Pointer<ffi.Char>)
+          ffi.Pointer<redisAsyncContext> Function(ffi.Pointer<ffi.Char>)
         >
-      >('redictAsyncConnectUnix');
-  late final _redictAsyncConnectUnix = _redictAsyncConnectUnixPtr
+      >('redisAsyncConnectUnix');
+  late final _redisAsyncConnectUnix = _redisAsyncConnectUnixPtr
       .asFunction<
-        ffi.Pointer<redictAsyncContext> Function(ffi.Pointer<ffi.Char>)
+        ffi.Pointer<redisAsyncContext> Function(ffi.Pointer<ffi.Char>)
       >();
 
-  int redictAsyncSetConnectCallback(
-    ffi.Pointer<redictAsyncContext> ac,
-    ffi.Pointer<redictConnectCallback> fn,
+  int redisAsyncSetConnectCallback(
+    ffi.Pointer<redisAsyncContext> ac,
+    ffi.Pointer<redisConnectCallback> fn,
   ) {
-    return _redictAsyncSetConnectCallback(ac, fn);
+    return _redisAsyncSetConnectCallback(ac, fn);
   }
 
-  late final _redictAsyncSetConnectCallbackPtr =
+  late final _redisAsyncSetConnectCallbackPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictAsyncContext>,
-            ffi.Pointer<redictConnectCallback>,
+            ffi.Pointer<redisAsyncContext>,
+            ffi.Pointer<redisConnectCallback>,
           )
         >
-      >('redictAsyncSetConnectCallback');
-  late final _redictAsyncSetConnectCallback = _redictAsyncSetConnectCallbackPtr
+      >('redisAsyncSetConnectCallback');
+  late final _redisAsyncSetConnectCallback = _redisAsyncSetConnectCallbackPtr
       .asFunction<
         int Function(
-          ffi.Pointer<redictAsyncContext>,
-          ffi.Pointer<redictConnectCallback>,
+          ffi.Pointer<redisAsyncContext>,
+          ffi.Pointer<redisConnectCallback>,
         )
       >();
 
-  int redictAsyncSetConnectCallbackNC(
-    ffi.Pointer<redictAsyncContext> ac,
-    ffi.Pointer<redictConnectCallbackNC> fn,
+  int redisAsyncSetConnectCallbackNC(
+    ffi.Pointer<redisAsyncContext> ac,
+    ffi.Pointer<redisConnectCallbackNC> fn,
   ) {
-    return _redictAsyncSetConnectCallbackNC(ac, fn);
+    return _redisAsyncSetConnectCallbackNC(ac, fn);
   }
 
-  late final _redictAsyncSetConnectCallbackNCPtr =
+  late final _redisAsyncSetConnectCallbackNCPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictAsyncContext>,
-            ffi.Pointer<redictConnectCallbackNC>,
+            ffi.Pointer<redisAsyncContext>,
+            ffi.Pointer<redisConnectCallbackNC>,
           )
         >
-      >('redictAsyncSetConnectCallbackNC');
-  late final _redictAsyncSetConnectCallbackNC =
-      _redictAsyncSetConnectCallbackNCPtr
+      >('redisAsyncSetConnectCallbackNC');
+  late final _redisAsyncSetConnectCallbackNC =
+      _redisAsyncSetConnectCallbackNCPtr
           .asFunction<
             int Function(
-              ffi.Pointer<redictAsyncContext>,
-              ffi.Pointer<redictConnectCallbackNC>,
+              ffi.Pointer<redisAsyncContext>,
+              ffi.Pointer<redisConnectCallbackNC>,
             )
           >();
 
-  int redictAsyncSetDisconnectCallback(
-    ffi.Pointer<redictAsyncContext> ac,
-    ffi.Pointer<redictDisconnectCallback> fn,
+  int redisAsyncSetDisconnectCallback(
+    ffi.Pointer<redisAsyncContext> ac,
+    ffi.Pointer<redisDisconnectCallback> fn,
   ) {
-    return _redictAsyncSetDisconnectCallback(ac, fn);
+    return _redisAsyncSetDisconnectCallback(ac, fn);
   }
 
-  late final _redictAsyncSetDisconnectCallbackPtr =
+  late final _redisAsyncSetDisconnectCallbackPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictAsyncContext>,
-            ffi.Pointer<redictDisconnectCallback>,
+            ffi.Pointer<redisAsyncContext>,
+            ffi.Pointer<redisDisconnectCallback>,
           )
         >
-      >('redictAsyncSetDisconnectCallback');
-  late final _redictAsyncSetDisconnectCallback =
-      _redictAsyncSetDisconnectCallbackPtr
+      >('redisAsyncSetDisconnectCallback');
+  late final _redisAsyncSetDisconnectCallback =
+      _redisAsyncSetDisconnectCallbackPtr
           .asFunction<
             int Function(
-              ffi.Pointer<redictAsyncContext>,
-              ffi.Pointer<redictDisconnectCallback>,
+              ffi.Pointer<redisAsyncContext>,
+              ffi.Pointer<redisDisconnectCallback>,
             )
           >();
 
-  ffi.Pointer<redictAsyncPushFn> redictAsyncSetPushCallback(
-    ffi.Pointer<redictAsyncContext> ac,
-    ffi.Pointer<redictAsyncPushFn> fn,
+  ffi.Pointer<redisAsyncPushFn> redisAsyncSetPushCallback(
+    ffi.Pointer<redisAsyncContext> ac,
+    ffi.Pointer<redisAsyncPushFn> fn,
   ) {
-    return _redictAsyncSetPushCallback(ac, fn);
+    return _redisAsyncSetPushCallback(ac, fn);
   }
 
-  late final _redictAsyncSetPushCallbackPtr =
+  late final _redisAsyncSetPushCallbackPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Pointer<redictAsyncPushFn> Function(
-            ffi.Pointer<redictAsyncContext>,
-            ffi.Pointer<redictAsyncPushFn>,
+          ffi.Pointer<redisAsyncPushFn> Function(
+            ffi.Pointer<redisAsyncContext>,
+            ffi.Pointer<redisAsyncPushFn>,
           )
         >
-      >('redictAsyncSetPushCallback');
-  late final _redictAsyncSetPushCallback = _redictAsyncSetPushCallbackPtr
+      >('redisAsyncSetPushCallback');
+  late final _redisAsyncSetPushCallback = _redisAsyncSetPushCallbackPtr
       .asFunction<
-        ffi.Pointer<redictAsyncPushFn> Function(
-          ffi.Pointer<redictAsyncContext>,
-          ffi.Pointer<redictAsyncPushFn>,
+        ffi.Pointer<redisAsyncPushFn> Function(
+          ffi.Pointer<redisAsyncContext>,
+          ffi.Pointer<redisAsyncPushFn>,
         )
       >();
 
-  int redictAsyncSetTimeout(ffi.Pointer<redictAsyncContext> ac, timeval tv) {
-    return _redictAsyncSetTimeout(ac, tv);
+  int redisAsyncSetTimeout(ffi.Pointer<redisAsyncContext> ac, timeval tv) {
+    return _redisAsyncSetTimeout(ac, tv);
   }
 
-  late final _redictAsyncSetTimeoutPtr =
+  late final _redisAsyncSetTimeoutPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<redictAsyncContext>, timeval)
+          ffi.Int Function(ffi.Pointer<redisAsyncContext>, timeval)
         >
-      >('redictAsyncSetTimeout');
-  late final _redictAsyncSetTimeout = _redictAsyncSetTimeoutPtr
-      .asFunction<int Function(ffi.Pointer<redictAsyncContext>, timeval)>();
+      >('redisAsyncSetTimeout');
+  late final _redisAsyncSetTimeout = _redisAsyncSetTimeoutPtr
+      .asFunction<int Function(ffi.Pointer<redisAsyncContext>, timeval)>();
 
-  void redictAsyncDisconnect(ffi.Pointer<redictAsyncContext> ac) {
-    return _redictAsyncDisconnect(ac);
+  void redisAsyncDisconnect(ffi.Pointer<redisAsyncContext> ac) {
+    return _redisAsyncDisconnect(ac);
   }
 
-  late final _redictAsyncDisconnectPtr =
+  late final _redisAsyncDisconnectPtr =
       _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictAsyncContext>)>
-      >('redictAsyncDisconnect');
-  late final _redictAsyncDisconnect = _redictAsyncDisconnectPtr
-      .asFunction<void Function(ffi.Pointer<redictAsyncContext>)>();
+        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisAsyncContext>)>
+      >('redisAsyncDisconnect');
+  late final _redisAsyncDisconnect = _redisAsyncDisconnectPtr
+      .asFunction<void Function(ffi.Pointer<redisAsyncContext>)>();
 
-  void redictAsyncFree(ffi.Pointer<redictAsyncContext> ac) {
-    return _redictAsyncFree(ac);
+  void redisAsyncFree(ffi.Pointer<redisAsyncContext> ac) {
+    return _redisAsyncFree(ac);
   }
 
-  late final _redictAsyncFreePtr =
+  late final _redisAsyncFreePtr =
       _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictAsyncContext>)>
-      >('redictAsyncFree');
-  late final _redictAsyncFree = _redictAsyncFreePtr
-      .asFunction<void Function(ffi.Pointer<redictAsyncContext>)>();
+        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisAsyncContext>)>
+      >('redisAsyncFree');
+  late final _redisAsyncFree = _redisAsyncFreePtr
+      .asFunction<void Function(ffi.Pointer<redisAsyncContext>)>();
 
-  void redictAsyncHandleRead(ffi.Pointer<redictAsyncContext> ac) {
-    return _redictAsyncHandleRead(ac);
+  void redisAsyncHandleRead(ffi.Pointer<redisAsyncContext> ac) {
+    return _redisAsyncHandleRead(ac);
   }
 
-  late final _redictAsyncHandleReadPtr =
+  late final _redisAsyncHandleReadPtr =
       _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictAsyncContext>)>
-      >('redictAsyncHandleRead');
-  late final _redictAsyncHandleRead = _redictAsyncHandleReadPtr
-      .asFunction<void Function(ffi.Pointer<redictAsyncContext>)>();
+        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisAsyncContext>)>
+      >('redisAsyncHandleRead');
+  late final _redisAsyncHandleRead = _redisAsyncHandleReadPtr
+      .asFunction<void Function(ffi.Pointer<redisAsyncContext>)>();
 
-  void redictAsyncHandleWrite(ffi.Pointer<redictAsyncContext> ac) {
-    return _redictAsyncHandleWrite(ac);
+  void redisAsyncHandleWrite(ffi.Pointer<redisAsyncContext> ac) {
+    return _redisAsyncHandleWrite(ac);
   }
 
-  late final _redictAsyncHandleWritePtr =
+  late final _redisAsyncHandleWritePtr =
       _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictAsyncContext>)>
-      >('redictAsyncHandleWrite');
-  late final _redictAsyncHandleWrite = _redictAsyncHandleWritePtr
-      .asFunction<void Function(ffi.Pointer<redictAsyncContext>)>();
+        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisAsyncContext>)>
+      >('redisAsyncHandleWrite');
+  late final _redisAsyncHandleWrite = _redisAsyncHandleWritePtr
+      .asFunction<void Function(ffi.Pointer<redisAsyncContext>)>();
 
-  void redictAsyncHandleTimeout(ffi.Pointer<redictAsyncContext> ac) {
-    return _redictAsyncHandleTimeout(ac);
+  void redisAsyncHandleTimeout(ffi.Pointer<redisAsyncContext> ac) {
+    return _redisAsyncHandleTimeout(ac);
   }
 
-  late final _redictAsyncHandleTimeoutPtr =
+  late final _redisAsyncHandleTimeoutPtr =
       _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictAsyncContext>)>
-      >('redictAsyncHandleTimeout');
-  late final _redictAsyncHandleTimeout = _redictAsyncHandleTimeoutPtr
-      .asFunction<void Function(ffi.Pointer<redictAsyncContext>)>();
+        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisAsyncContext>)>
+      >('redisAsyncHandleTimeout');
+  late final _redisAsyncHandleTimeout = _redisAsyncHandleTimeoutPtr
+      .asFunction<void Function(ffi.Pointer<redisAsyncContext>)>();
 
-  void redictAsyncRead(ffi.Pointer<redictAsyncContext> ac) {
-    return _redictAsyncRead(ac);
+  void redisAsyncRead(ffi.Pointer<redisAsyncContext> ac) {
+    return _redisAsyncRead(ac);
   }
 
-  late final _redictAsyncReadPtr =
+  late final _redisAsyncReadPtr =
       _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictAsyncContext>)>
-      >('redictAsyncRead');
-  late final _redictAsyncRead = _redictAsyncReadPtr
-      .asFunction<void Function(ffi.Pointer<redictAsyncContext>)>();
+        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisAsyncContext>)>
+      >('redisAsyncRead');
+  late final _redisAsyncRead = _redisAsyncReadPtr
+      .asFunction<void Function(ffi.Pointer<redisAsyncContext>)>();
 
-  void redictAsyncWrite(ffi.Pointer<redictAsyncContext> ac) {
-    return _redictAsyncWrite(ac);
+  void redisAsyncWrite(ffi.Pointer<redisAsyncContext> ac) {
+    return _redisAsyncWrite(ac);
   }
 
-  late final _redictAsyncWritePtr =
+  late final _redisAsyncWritePtr =
       _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictAsyncContext>)>
-      >('redictAsyncWrite');
-  late final _redictAsyncWrite = _redictAsyncWritePtr
-      .asFunction<void Function(ffi.Pointer<redictAsyncContext>)>();
+        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisAsyncContext>)>
+      >('redisAsyncWrite');
+  late final _redisAsyncWrite = _redisAsyncWritePtr
+      .asFunction<void Function(ffi.Pointer<redisAsyncContext>)>();
 
-  int redictvAsyncCommand(
-    ffi.Pointer<redictAsyncContext> ac,
-    ffi.Pointer<redictCallbackFn> fn,
+  int redisvAsyncCommand(
+    ffi.Pointer<redisAsyncContext> ac,
+    ffi.Pointer<redisCallbackFn> fn,
     ffi.Pointer<ffi.Void> privdata,
     ffi.Pointer<ffi.Char> format,
     ffi.Pointer<__va_list_tag> ap,
   ) {
-    return _redictvAsyncCommand(ac, fn, privdata, format, ap);
+    return _redisvAsyncCommand(ac, fn, privdata, format, ap);
   }
 
-  late final _redictvAsyncCommandPtr =
+  late final _redisvAsyncCommandPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictAsyncContext>,
-            ffi.Pointer<redictCallbackFn>,
+            ffi.Pointer<redisAsyncContext>,
+            ffi.Pointer<redisCallbackFn>,
             ffi.Pointer<ffi.Void>,
             ffi.Pointer<ffi.Char>,
             ffi.Pointer<__va_list_tag>,
           )
         >
-      >('redictvAsyncCommand');
-  late final _redictvAsyncCommand = _redictvAsyncCommandPtr
+      >('redisvAsyncCommand');
+  late final _redisvAsyncCommand = _redisvAsyncCommandPtr
       .asFunction<
         int Function(
-          ffi.Pointer<redictAsyncContext>,
-          ffi.Pointer<redictCallbackFn>,
+          ffi.Pointer<redisAsyncContext>,
+          ffi.Pointer<redisCallbackFn>,
           ffi.Pointer<ffi.Void>,
           ffi.Pointer<ffi.Char>,
           ffi.Pointer<__va_list_tag>,
         )
       >();
 
-  int redictAsyncCommand(
-    ffi.Pointer<redictAsyncContext> ac,
-    ffi.Pointer<redictCallbackFn> fn,
+  int redisAsyncCommand(
+    ffi.Pointer<redisAsyncContext> ac,
+    ffi.Pointer<redisCallbackFn> fn,
     ffi.Pointer<ffi.Void> privdata,
     ffi.Pointer<ffi.Char> format,
   ) {
-    return _redictAsyncCommand(ac, fn, privdata, format);
+    return _redisAsyncCommand(ac, fn, privdata, format);
   }
 
-  late final _redictAsyncCommandPtr =
+  late final _redisAsyncCommandPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictAsyncContext>,
-            ffi.Pointer<redictCallbackFn>,
+            ffi.Pointer<redisAsyncContext>,
+            ffi.Pointer<redisCallbackFn>,
             ffi.Pointer<ffi.Void>,
             ffi.Pointer<ffi.Char>,
           )
         >
-      >('redictAsyncCommand');
-  late final _redictAsyncCommand = _redictAsyncCommandPtr
+      >('redisAsyncCommand');
+  late final _redisAsyncCommand = _redisAsyncCommandPtr
       .asFunction<
         int Function(
-          ffi.Pointer<redictAsyncContext>,
-          ffi.Pointer<redictCallbackFn>,
+          ffi.Pointer<redisAsyncContext>,
+          ffi.Pointer<redisCallbackFn>,
           ffi.Pointer<ffi.Void>,
           ffi.Pointer<ffi.Char>,
         )
       >();
 
-  int redictAsyncCommandArgv(
-    ffi.Pointer<redictAsyncContext> ac,
-    ffi.Pointer<redictCallbackFn> fn,
+  int redisAsyncCommandArgv(
+    ffi.Pointer<redisAsyncContext> ac,
+    ffi.Pointer<redisCallbackFn> fn,
     ffi.Pointer<ffi.Void> privdata,
     int argc,
     ffi.Pointer<ffi.Pointer<ffi.Char>> argv,
     ffi.Pointer<ffi.Size> argvlen,
   ) {
-    return _redictAsyncCommandArgv(ac, fn, privdata, argc, argv, argvlen);
+    return _redisAsyncCommandArgv(ac, fn, privdata, argc, argv, argvlen);
   }
 
-  late final _redictAsyncCommandArgvPtr =
+  late final _redisAsyncCommandArgvPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictAsyncContext>,
-            ffi.Pointer<redictCallbackFn>,
+            ffi.Pointer<redisAsyncContext>,
+            ffi.Pointer<redisCallbackFn>,
             ffi.Pointer<ffi.Void>,
             ffi.Int,
             ffi.Pointer<ffi.Pointer<ffi.Char>>,
             ffi.Pointer<ffi.Size>,
           )
         >
-      >('redictAsyncCommandArgv');
-  late final _redictAsyncCommandArgv = _redictAsyncCommandArgvPtr
+      >('redisAsyncCommandArgv');
+  late final _redisAsyncCommandArgv = _redisAsyncCommandArgvPtr
       .asFunction<
         int Function(
-          ffi.Pointer<redictAsyncContext>,
-          ffi.Pointer<redictCallbackFn>,
+          ffi.Pointer<redisAsyncContext>,
+          ffi.Pointer<redisCallbackFn>,
           ffi.Pointer<ffi.Void>,
           int,
           ffi.Pointer<ffi.Pointer<ffi.Char>>,
@@ -1670,33 +1663,33 @@ class HiredisBindings {
         )
       >();
 
-  int redictAsyncFormattedCommand(
-    ffi.Pointer<redictAsyncContext> ac,
-    ffi.Pointer<redictCallbackFn> fn,
+  int redisAsyncFormattedCommand(
+    ffi.Pointer<redisAsyncContext> ac,
+    ffi.Pointer<redisCallbackFn> fn,
     ffi.Pointer<ffi.Void> privdata,
     ffi.Pointer<ffi.Char> cmd,
     int len,
   ) {
-    return _redictAsyncFormattedCommand(ac, fn, privdata, cmd, len);
+    return _redisAsyncFormattedCommand(ac, fn, privdata, cmd, len);
   }
 
-  late final _redictAsyncFormattedCommandPtr =
+  late final _redisAsyncFormattedCommandPtr =
       _lookup<
         ffi.NativeFunction<
           ffi.Int Function(
-            ffi.Pointer<redictAsyncContext>,
-            ffi.Pointer<redictCallbackFn>,
+            ffi.Pointer<redisAsyncContext>,
+            ffi.Pointer<redisCallbackFn>,
             ffi.Pointer<ffi.Void>,
             ffi.Pointer<ffi.Char>,
             ffi.Size,
           )
         >
-      >('redictAsyncFormattedCommand');
-  late final _redictAsyncFormattedCommand = _redictAsyncFormattedCommandPtr
+      >('redisAsyncFormattedCommand');
+  late final _redisAsyncFormattedCommand = _redisAsyncFormattedCommandPtr
       .asFunction<
         int Function(
-          ffi.Pointer<redictAsyncContext>,
-          ffi.Pointer<redictCallbackFn>,
+          ffi.Pointer<redisAsyncContext>,
+          ffi.Pointer<redisCallbackFn>,
           ffi.Pointer<ffi.Void>,
           ffi.Pointer<ffi.Char>,
           int,
@@ -1715,7 +1708,7 @@ class HiredisBindings {
   /// @param timeout_ms Timeout in milliseconds. Use -1 for infinite wait.
   /// @return Poll result code.
   RedisPollResult redis_async_poll(
-    ffi.Pointer<redictAsyncContext> ctx,
+    ffi.Pointer<redisAsyncContext> ctx,
     int timeout_ms,
   ) {
     return RedisPollResult.fromValue(_redis_async_poll(ctx, timeout_ms));
@@ -1724,11 +1717,11 @@ class HiredisBindings {
   late final _redis_async_pollPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<redictAsyncContext>, ffi.Int)
+          ffi.Int Function(ffi.Pointer<redisAsyncContext>, ffi.Int)
         >
       >('redis_async_poll');
   late final _redis_async_poll = _redis_async_pollPtr
-      .asFunction<int Function(ffi.Pointer<redictAsyncContext>, int)>();
+      .asFunction<int Function(ffi.Pointer<redisAsyncContext>, int)>();
 
   /// Starts a polling loop in the current thread.
   ///
@@ -1739,7 +1732,7 @@ class HiredisBindings {
   /// @param ctx The async context to run the loop for.
   /// @param poll_interval_ms Timeout for each poll iteration.
   void redis_async_run_loop(
-    ffi.Pointer<redictAsyncContext> ctx,
+    ffi.Pointer<redisAsyncContext> ctx,
     int poll_interval_ms,
   ) {
     return _redis_async_run_loop(ctx, poll_interval_ms);
@@ -1748,52 +1741,52 @@ class HiredisBindings {
   late final _redis_async_run_loopPtr =
       _lookup<
         ffi.NativeFunction<
-          ffi.Void Function(ffi.Pointer<redictAsyncContext>, ffi.Int)
+          ffi.Void Function(ffi.Pointer<redisAsyncContext>, ffi.Int)
         >
       >('redis_async_run_loop');
   late final _redis_async_run_loop = _redis_async_run_loopPtr
-      .asFunction<void Function(ffi.Pointer<redictAsyncContext>, int)>();
+      .asFunction<void Function(ffi.Pointer<redisAsyncContext>, int)>();
 
   /// Gets the file descriptor from an async context.
   /// @return The fd, or -1 if the context is null or disconnected.
-  int redis_async_get_fd(ffi.Pointer<redictAsyncContext> ctx) {
+  int redis_async_get_fd(ffi.Pointer<redisAsyncContext> ctx) {
     return _redis_async_get_fd(ctx);
   }
 
   late final _redis_async_get_fdPtr =
       _lookup<
-        ffi.NativeFunction<ffi.Int Function(ffi.Pointer<redictAsyncContext>)>
+        ffi.NativeFunction<ffi.Int Function(ffi.Pointer<redisAsyncContext>)>
       >('redis_async_get_fd');
   late final _redis_async_get_fd = _redis_async_get_fdPtr
-      .asFunction<int Function(ffi.Pointer<redictAsyncContext>)>();
+      .asFunction<int Function(ffi.Pointer<redisAsyncContext>)>();
 
   /// Checks if the async context is connected.
   /// @return true if connected, false otherwise.
-  bool redis_async_is_connected(ffi.Pointer<redictAsyncContext> ctx) {
+  bool redis_async_is_connected(ffi.Pointer<redisAsyncContext> ctx) {
     return _redis_async_is_connected(ctx);
   }
 
   late final _redis_async_is_connectedPtr =
       _lookup<
-        ffi.NativeFunction<ffi.Bool Function(ffi.Pointer<redictAsyncContext>)>
+        ffi.NativeFunction<ffi.Bool Function(ffi.Pointer<redisAsyncContext>)>
       >('redis_async_is_connected');
   late final _redis_async_is_connected = _redis_async_is_connectedPtr
-      .asFunction<bool Function(ffi.Pointer<redictAsyncContext>)>();
+      .asFunction<bool Function(ffi.Pointer<redisAsyncContext>)>();
 
   /// Forces a write flush - sends any pending commands immediately.
-  void redis_async_flush(ffi.Pointer<redictAsyncContext> ctx) {
+  void redis_async_flush(ffi.Pointer<redisAsyncContext> ctx) {
     return _redis_async_flush(ctx);
   }
 
   late final _redis_async_flushPtr =
       _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictAsyncContext>)>
+        ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisAsyncContext>)>
       >('redis_async_flush');
   late final _redis_async_flush = _redis_async_flushPtr
-      .asFunction<void Function(ffi.Pointer<redictAsyncContext>)>();
+      .asFunction<void Function(ffi.Pointer<redisAsyncContext>)>();
 }
 
-final class redictReadTask extends ffi.Struct {
+final class redisReadTask extends ffi.Struct {
   @ffi.Int()
   external int type;
 
@@ -1805,16 +1798,16 @@ final class redictReadTask extends ffi.Struct {
 
   external ffi.Pointer<ffi.Void> obj;
 
-  external ffi.Pointer<redictReadTask> parent;
+  external ffi.Pointer<redisReadTask> parent;
 
   external ffi.Pointer<ffi.Void> privdata;
 }
 
-final class redictReplyObjectFunctions extends ffi.Struct {
+final class redisReplyObjectFunctions extends ffi.Struct {
   external ffi.Pointer<
     ffi.NativeFunction<
       ffi.Pointer<ffi.Void> Function(
-        ffi.Pointer<redictReadTask>,
+        ffi.Pointer<redisReadTask>,
         ffi.Pointer<ffi.Char>,
         ffi.Size,
       )
@@ -1824,14 +1817,14 @@ final class redictReplyObjectFunctions extends ffi.Struct {
 
   external ffi.Pointer<
     ffi.NativeFunction<
-      ffi.Pointer<ffi.Void> Function(ffi.Pointer<redictReadTask>, ffi.Size)
+      ffi.Pointer<ffi.Void> Function(ffi.Pointer<redisReadTask>, ffi.Size)
     >
   >
   createArray;
 
   external ffi.Pointer<
     ffi.NativeFunction<
-      ffi.Pointer<ffi.Void> Function(ffi.Pointer<redictReadTask>, ffi.LongLong)
+      ffi.Pointer<ffi.Void> Function(ffi.Pointer<redisReadTask>, ffi.LongLong)
     >
   >
   createInteger;
@@ -1839,7 +1832,7 @@ final class redictReplyObjectFunctions extends ffi.Struct {
   external ffi.Pointer<
     ffi.NativeFunction<
       ffi.Pointer<ffi.Void> Function(
-        ffi.Pointer<redictReadTask>,
+        ffi.Pointer<redisReadTask>,
         ffi.Double,
         ffi.Pointer<ffi.Char>,
         ffi.Size,
@@ -1850,14 +1843,14 @@ final class redictReplyObjectFunctions extends ffi.Struct {
 
   external ffi.Pointer<
     ffi.NativeFunction<
-      ffi.Pointer<ffi.Void> Function(ffi.Pointer<redictReadTask>)
+      ffi.Pointer<ffi.Void> Function(ffi.Pointer<redisReadTask>)
     >
   >
   createNil;
 
   external ffi.Pointer<
     ffi.NativeFunction<
-      ffi.Pointer<ffi.Void> Function(ffi.Pointer<redictReadTask>, ffi.Int)
+      ffi.Pointer<ffi.Void> Function(ffi.Pointer<redisReadTask>, ffi.Int)
     >
   >
   createBool;
@@ -1868,7 +1861,7 @@ final class redictReplyObjectFunctions extends ffi.Struct {
   freeObject;
 }
 
-final class redictReader extends ffi.Struct {
+final class redisReader extends ffi.Struct {
   @ffi.Int()
   external int err;
 
@@ -1889,7 +1882,7 @@ final class redictReader extends ffi.Struct {
   @ffi.LongLong()
   external int maxelements;
 
-  external ffi.Pointer<ffi.Pointer<redictReadTask>> task;
+  external ffi.Pointer<ffi.Pointer<redisReadTask>> task;
 
   @ffi.Int()
   external int tasks;
@@ -1899,7 +1892,7 @@ final class redictReader extends ffi.Struct {
 
   external ffi.Pointer<ffi.Void> reply;
 
-  external ffi.Pointer<redictReplyObjectFunctions> fn;
+  external ffi.Pointer<redisReplyObjectFunctions> fn;
 
   external ffi.Pointer<ffi.Void> privdata;
 }
@@ -1922,7 +1915,7 @@ typedef __darwin_ssize_t = ffi.Long;
 typedef Dart__darwin_ssize_t = int;
 typedef ssize_t = __darwin_ssize_t;
 
-final class hiredictAllocFuncs extends ffi.Struct {
+final class hiredisAllocFuncs extends ffi.Struct {
   external ffi.Pointer<
     ffi.NativeFunction<ffi.Pointer<ffi.Void> Function(ffi.Size)>
   >
@@ -1951,9 +1944,9 @@ final class hiredictAllocFuncs extends ffi.Struct {
   freeFn;
 }
 
-final class redictContextFuncs extends ffi.Struct {
+final class redisContextFuncs extends ffi.Struct {
   external ffi.Pointer<
-    ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictContext>)>
+    ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisContext>)>
   >
   close;
 
@@ -1963,19 +1956,19 @@ final class redictContextFuncs extends ffi.Struct {
   free_privctx;
 
   external ffi.Pointer<
-    ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictAsyncContext>)>
+    ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisAsyncContext>)>
   >
   async_read;
 
   external ffi.Pointer<
-    ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redictAsyncContext>)>
+    ffi.NativeFunction<ffi.Void Function(ffi.Pointer<redisAsyncContext>)>
   >
   async_write;
 
   external ffi.Pointer<
     ffi.NativeFunction<
       ssize_t Function(
-        ffi.Pointer<redictContext>,
+        ffi.Pointer<redisContext>,
         ffi.Pointer<ffi.Char>,
         ffi.Size,
       )
@@ -1984,27 +1977,27 @@ final class redictContextFuncs extends ffi.Struct {
   read;
 
   external ffi.Pointer<
-    ffi.NativeFunction<ssize_t Function(ffi.Pointer<redictContext>)>
+    ffi.NativeFunction<ssize_t Function(ffi.Pointer<redisContext>)>
   >
   write;
 }
 
-typedef redictFD = ffi.Int;
-typedef DartredictFD = int;
+typedef redisFD = ffi.Int;
+typedef DartredisFD = int;
 
-enum redictConnectionType {
-  REDICT_CONN_TCP(0),
-  REDICT_CONN_UNIX(1),
-  REDICT_CONN_USERFD(2);
+enum redisConnectionType {
+  REDIS_CONN_TCP(0),
+  REDIS_CONN_UNIX(1),
+  REDIS_CONN_USERFD(2);
 
   final int value;
-  const redictConnectionType(this.value);
+  const redisConnectionType(this.value);
 
-  static redictConnectionType fromValue(int value) => switch (value) {
-    0 => REDICT_CONN_TCP,
-    1 => REDICT_CONN_UNIX,
-    2 => REDICT_CONN_USERFD,
-    _ => throw ArgumentError('Unknown value for redictConnectionType: $value'),
+  static redisConnectionType fromValue(int value) => switch (value) {
+    0 => REDIS_CONN_TCP,
+    1 => REDIS_CONN_UNIX,
+    2 => REDIS_CONN_USERFD,
+    _ => throw ArgumentError('Unknown value for redisConnectionType: $value'),
   };
 }
 
@@ -2037,13 +2030,13 @@ final class UnnamedStruct$3 extends ffi.Struct {
 
 final class sockaddr extends ffi.Opaque {}
 
-typedef redictPushFn =
+typedef redisPushFn =
     ffi.NativeFunction<
       ffi.Void Function(ffi.Pointer<ffi.Void>, ffi.Pointer<ffi.Void>)
     >;
 
-final class redictContext extends ffi.Struct {
-  external ffi.Pointer<redictContextFuncs> funcs;
+final class redisContext extends ffi.Struct {
+  external ffi.Pointer<redisContextFuncs> funcs;
 
   @ffi.Int()
   external int err;
@@ -2051,7 +2044,7 @@ final class redictContext extends ffi.Struct {
   @ffi.Array.multi([128])
   external ffi.Array<ffi.Char> errstr;
 
-  @redictFD()
+  @redisFD()
   external int fd;
 
   @ffi.Int()
@@ -2059,13 +2052,13 @@ final class redictContext extends ffi.Struct {
 
   external ffi.Pointer<ffi.Char> obuf;
 
-  external ffi.Pointer<redictReader> reader;
+  external ffi.Pointer<redisReader> reader;
 
   @ffi.UnsignedInt()
   external int connection_typeAsInt;
 
-  redictConnectionType get connection_type =>
-      redictConnectionType.fromValue(connection_typeAsInt);
+  redisConnectionType get connection_type =>
+      redisConnectionType.fromValue(connection_typeAsInt);
 
   external ffi.Pointer<timeval> connect_timeout;
 
@@ -2089,7 +2082,7 @@ final class redictContext extends ffi.Struct {
 
   external ffi.Pointer<ffi.Void> privctx;
 
-  external ffi.Pointer<redictPushFn> push_cb;
+  external ffi.Pointer<redisPushFn> push_cb;
 }
 
 final class UnnamedStruct extends ffi.Struct {
@@ -2128,31 +2121,31 @@ final class UnnamedStruct extends ffi.Struct {
   scheduleTimer;
 }
 
-typedef redictDisconnectCallback =
+typedef redisDisconnectCallback =
     ffi.NativeFunction<
-      ffi.Void Function(ffi.Pointer<redictAsyncContext>, ffi.Int)
+      ffi.Void Function(ffi.Pointer<redisAsyncContext>, ffi.Int)
     >;
-typedef redictConnectCallback =
+typedef redisConnectCallback =
     ffi.NativeFunction<
-      ffi.Void Function(ffi.Pointer<redictAsyncContext>, ffi.Int)
+      ffi.Void Function(ffi.Pointer<redisAsyncContext>, ffi.Int)
     >;
-typedef redictConnectCallbackNC =
+typedef redisConnectCallbackNC =
     ffi.NativeFunction<
-      ffi.Void Function(ffi.Pointer<redictAsyncContext>, ffi.Int)
+      ffi.Void Function(ffi.Pointer<redisAsyncContext>, ffi.Int)
     >;
-typedef redictCallbackFn =
+typedef redisCallbackFn =
     ffi.NativeFunction<
       ffi.Void Function(
-        ffi.Pointer<redictAsyncContext>,
+        ffi.Pointer<redisAsyncContext>,
         ffi.Pointer<ffi.Void>,
         ffi.Pointer<ffi.Void>,
       )
     >;
 
-final class redictCallback extends ffi.Struct {
-  external ffi.Pointer<redictCallback> next;
+final class redisCallback extends ffi.Struct {
+  external ffi.Pointer<redisCallback> next;
 
-  external ffi.Pointer<redictCallbackFn> fn;
+  external ffi.Pointer<redisCallbackFn> fn;
 
   @ffi.Int()
   external int pending_subs;
@@ -2163,16 +2156,16 @@ final class redictCallback extends ffi.Struct {
   external ffi.Pointer<ffi.Void> privdata;
 }
 
-final class redictCallbackList extends ffi.Struct {
-  external ffi.Pointer<redictCallback> head;
+final class redisCallbackList extends ffi.Struct {
+  external ffi.Pointer<redisCallback> head;
 
-  external ffi.Pointer<redictCallback> tail;
+  external ffi.Pointer<redisCallback> tail;
 }
 
 final class dict extends ffi.Opaque {}
 
 final class UnnamedStruct$1 extends ffi.Struct {
-  external redictCallbackList replies;
+  external redisCallbackList replies;
 
   external ffi.Pointer<dict> channels;
 
@@ -2182,13 +2175,13 @@ final class UnnamedStruct$1 extends ffi.Struct {
   external int pending_unsubs;
 }
 
-typedef redictAsyncPushFn =
+typedef redisAsyncPushFn =
     ffi.NativeFunction<
-      ffi.Void Function(ffi.Pointer<redictAsyncContext>, ffi.Pointer<ffi.Void>)
+      ffi.Void Function(ffi.Pointer<redisAsyncContext>, ffi.Pointer<ffi.Void>)
     >;
 
-final class redictAsyncContext extends ffi.Struct {
-  external redictContext c;
+final class redisAsyncContext extends ffi.Struct {
+  external redisContext c;
 
   @ffi.Int()
   external int err;
@@ -2204,13 +2197,13 @@ final class redictAsyncContext extends ffi.Struct {
 
   external UnnamedStruct ev;
 
-  external ffi.Pointer<redictDisconnectCallback> onDisconnect;
+  external ffi.Pointer<redisDisconnectCallback> onDisconnect;
 
-  external ffi.Pointer<redictConnectCallback> onConnect;
+  external ffi.Pointer<redisConnectCallback> onConnect;
 
-  external ffi.Pointer<redictConnectCallbackNC> onConnectNC;
+  external ffi.Pointer<redisConnectCallbackNC> onConnectNC;
 
-  external redictCallbackList replies;
+  external redisCallbackList replies;
 
   external ffi.Pointer<sockaddr> saddr;
 
@@ -2219,10 +2212,10 @@ final class redictAsyncContext extends ffi.Struct {
 
   external UnnamedStruct$1 sub;
 
-  external ffi.Pointer<redictAsyncPushFn> push_cb;
+  external ffi.Pointer<redisAsyncPushFn> push_cb;
 }
 
-final class redictReply extends ffi.Struct {
+final class redisReply extends ffi.Struct {
   @ffi.Int()
   external int type;
 
@@ -2243,7 +2236,7 @@ final class redictReply extends ffi.Struct {
   @ffi.Size()
   external int elements;
 
-  external ffi.Pointer<ffi.Pointer<redictReply>> element;
+  external ffi.Pointer<ffi.Pointer<redisReply>> element;
 }
 
 /// use this field for tcp/ip connections
@@ -2262,13 +2255,13 @@ final class UnnamedUnion extends ffi.Union {
   /// use this field for unix domain sockets
   external ffi.Pointer<ffi.Char> unix_socket;
 
-  /// use this field to have hiredict operate an already-open
+  /// use this field to have hiredis operate an already-open
   /// file descriptor
-  @redictFD()
+  @redisFD()
   external int fd;
 }
 
-final class redictOptions extends ffi.Struct {
+final class redisOptions extends ffi.Struct {
   @ffi.Int()
   external int type;
 
@@ -2288,12 +2281,12 @@ final class redictOptions extends ffi.Struct {
   >
   free_privdata;
 
-  external ffi.Pointer<redictPushFn> push_cb;
+  external ffi.Pointer<redisPushFn> push_cb;
 
-  external ffi.Pointer<redictAsyncPushFn> async_push_cb;
+  external ffi.Pointer<redisAsyncPushFn> async_push_cb;
 }
 
-typedef redictTimerCallback =
+typedef redisTimerCallback =
     ffi.NativeFunction<
       ffi.Void Function(
         ffi.Pointer<ffi.Void> timer,
@@ -2320,104 +2313,104 @@ enum RedisPollResult {
   };
 }
 
-const int REDICT_ERR = -1;
+const int REDIS_ERR = -1;
 
-const int REDICT_OK = 0;
+const int REDIS_OK = 0;
 
-const int REDICT_ERR_IO = 1;
+const int REDIS_ERR_IO = 1;
 
-const int REDICT_ERR_EOF = 3;
+const int REDIS_ERR_EOF = 3;
 
-const int REDICT_ERR_PROTOCOL = 4;
+const int REDIS_ERR_PROTOCOL = 4;
 
-const int REDICT_ERR_OOM = 5;
+const int REDIS_ERR_OOM = 5;
 
-const int REDICT_ERR_TIMEOUT = 6;
+const int REDIS_ERR_TIMEOUT = 6;
 
-const int REDICT_ERR_OTHER = 2;
+const int REDIS_ERR_OTHER = 2;
 
-const int REDICT_REPLY_STRING = 1;
+const int REDIS_REPLY_STRING = 1;
 
-const int REDICT_REPLY_ARRAY = 2;
+const int REDIS_REPLY_ARRAY = 2;
 
-const int REDICT_REPLY_INTEGER = 3;
+const int REDIS_REPLY_INTEGER = 3;
 
-const int REDICT_REPLY_NIL = 4;
+const int REDIS_REPLY_NIL = 4;
 
-const int REDICT_REPLY_STATUS = 5;
+const int REDIS_REPLY_STATUS = 5;
 
-const int REDICT_REPLY_ERROR = 6;
+const int REDIS_REPLY_ERROR = 6;
 
-const int REDICT_REPLY_DOUBLE = 7;
+const int REDIS_REPLY_DOUBLE = 7;
 
-const int REDICT_REPLY_BOOL = 8;
+const int REDIS_REPLY_BOOL = 8;
 
-const int REDICT_REPLY_MAP = 9;
+const int REDIS_REPLY_MAP = 9;
 
-const int REDICT_REPLY_SET = 10;
+const int REDIS_REPLY_SET = 10;
 
-const int REDICT_REPLY_ATTR = 11;
+const int REDIS_REPLY_ATTR = 11;
 
-const int REDICT_REPLY_PUSH = 12;
+const int REDIS_REPLY_PUSH = 12;
 
-const int REDICT_REPLY_BIGNUM = 13;
+const int REDIS_REPLY_BIGNUM = 13;
 
-const int REDICT_REPLY_VERB = 14;
+const int REDIS_REPLY_VERB = 14;
 
-const int REDICT_READER_MAX_BUF = 16384;
+const int REDIS_READER_MAX_BUF = 16384;
 
-const int REDICT_READER_MAX_ARRAY_ELEMENTS = 4294967295;
+const int REDIS_READER_MAX_ARRAY_ELEMENTS = 4294967295;
 
-const int HIREDICT_MAJOR = 1;
+const int HIREDIS_MAJOR = 1;
 
-const int HIREDICT_MINOR = 3;
+const int HIREDIS_MINOR = 3;
 
-const int HIREDICT_PATCH = 1;
+const int HIREDIS_PATCH = 0;
 
-const int REDICT_BLOCK = 1;
+const int REDIS_BLOCK = 1;
 
-const int REDICT_CONNECTED = 2;
+const int REDIS_CONNECTED = 2;
 
-const int REDICT_DISCONNECTING = 4;
+const int REDIS_DISCONNECTING = 4;
 
-const int REDICT_FREEING = 8;
+const int REDIS_FREEING = 8;
 
-const int REDICT_IN_CALLBACK = 16;
+const int REDIS_IN_CALLBACK = 16;
 
-const int REDICT_SUBSCRIBED = 32;
+const int REDIS_SUBSCRIBED = 32;
 
-const int REDICT_MONITORING = 64;
+const int REDIS_MONITORING = 64;
 
-const int REDICT_REUSEADDR = 128;
+const int REDIS_REUSEADDR = 128;
 
-const int REDICT_SUPPORTS_PUSH = 256;
+const int REDIS_SUPPORTS_PUSH = 256;
 
-const int REDICT_NO_AUTO_FREE = 512;
+const int REDIS_NO_AUTO_FREE = 512;
 
-const int REDICT_NO_AUTO_FREE_REPLIES = 1024;
+const int REDIS_NO_AUTO_FREE_REPLIES = 1024;
 
-const int REDICT_PREFER_IPV4 = 2048;
+const int REDIS_PREFER_IPV4 = 2048;
 
-const int REDICT_PREFER_IPV6 = 4096;
+const int REDIS_PREFER_IPV6 = 4096;
 
-const int REDICT_KEEPALIVE_INTERVAL = 15;
+const int REDIS_KEEPALIVE_INTERVAL = 15;
 
-const int REDICT_CONNECT_RETRIES = 10;
+const int REDIS_CONNECT_RETRIES = 10;
 
-const int REDICT_OPT_NONBLOCK = 1;
+const int REDIS_OPT_NONBLOCK = 1;
 
-const int REDICT_OPT_REUSEADDR = 2;
+const int REDIS_OPT_REUSEADDR = 2;
 
-const int REDICT_OPT_NOAUTOFREE = 4;
+const int REDIS_OPT_NOAUTOFREE = 4;
 
-const int REDICT_OPT_NO_PUSH_AUTOFREE = 8;
+const int REDIS_OPT_NO_PUSH_AUTOFREE = 8;
 
-const int REDICT_OPT_NOAUTOFREEREPLIES = 16;
+const int REDIS_OPT_NOAUTOFREEREPLIES = 16;
 
-const int REDICT_OPT_PREFER_IPV4 = 32;
+const int REDIS_OPT_PREFER_IPV4 = 32;
 
-const int REDICT_OPT_PREFER_IPV6 = 64;
+const int REDIS_OPT_PREFER_IPV6 = 64;
 
-const int REDICT_OPT_PREFER_IP_UNSPEC = 96;
+const int REDIS_OPT_PREFER_IP_UNSPEC = 96;
 
-const int REDICT_INVALID_FD = -1;
+const int REDIS_INVALID_FD = -1;

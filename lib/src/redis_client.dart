@@ -183,33 +183,33 @@ class RedisClient {
     final bindings = HiredisBindings(dylib);
 
     // Set up connection options
-    final options = calloc<redictOptions>();
+    final options = calloc<redisOptions>();
     try {
       // Zero-initialize
-      for (var i = 0; i < sizeOf<redictOptions>(); i++) {
+      for (var i = 0; i < sizeOf<redisOptions>(); i++) {
         options.cast<Uint8>()[i] = 0;
       }
 
       final hostPtr = host.toNativeUtf8();
       try {
-        options.ref.type = redictConnectionType.REDICT_CONN_TCP.value;
+        options.ref.type = redisConnectionType.REDIS_CONN_TCP.value;
         options.ref.endpoint.tcp.ip = hostPtr.cast();
         options.ref.endpoint.tcp.port = port;
 
         // Dart controls memory lifetime
         options.ref.options =
-            REDICT_OPT_NOAUTOFREE |
-            REDICT_OPT_NOAUTOFREEREPLIES |
-            REDICT_OPT_NO_PUSH_AUTOFREE;
+            REDIS_OPT_NOAUTOFREE |
+            REDIS_OPT_NOAUTOFREEREPLIES |
+            REDIS_OPT_NO_PUSH_AUTOFREE;
 
-        final ctx = bindings.redictAsyncConnectWithOptions(options);
+        final ctx = bindings.redisAsyncConnectWithOptions(options);
         if (ctx == nullptr) {
           throw RedisException('Failed to allocate async context');
         }
 
         if (ctx.ref.err != 0) {
           final errStr = _extractErrorString(ctx.ref.errstr);
-          bindings.redictAsyncFree(ctx);
+          bindings.redisAsyncFree(ctx);
           throw RedisException('Connection failed: $errStr');
         }
 
@@ -259,7 +259,7 @@ class RedisClient {
       final completer = _pendingCommands.remove(message.commandId);
       if (completer != null) {
         if (message.replyAddress != 0) {
-          final replyPtr = Pointer<redictReply>.fromAddress(
+          final replyPtr = Pointer<redisReply>.fromAddress(
             message.replyAddress,
           );
           final reply = RedisReply.fromPointer(
@@ -430,7 +430,7 @@ class RedisClient {
     }
     _pendingCommands.clear();
 
-    // Note: The isolate is responsible for calling redictAsyncFree
+    // Note: The isolate is responsible for calling redisAsyncFree
     // after closing the NativeCallable
   }
 }
@@ -478,7 +478,7 @@ class _PubSubMessage {
 void _pollIsolateEntry(_PollIsolateArgs args) {
   final dylib = RedisClient._openLibrary();
   final bindings = HiredisBindings(dylib);
-  final ctx = Pointer<redictAsyncContext>.fromAddress(args.ctxAddress);
+  final ctx = Pointer<redisAsyncContext>.fromAddress(args.ctxAddress);
 
   final commandPort = ReceivePort();
   args.initPort.send(commandPort.sendPort);
@@ -489,7 +489,7 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
 
   // Create the callback
   void onReply(
-    Pointer<redictAsyncContext> ac,
+    Pointer<redisAsyncContext> ac,
     Pointer<Void> replyPtr,
     Pointer<Void> privdata,
   ) {
@@ -503,12 +503,12 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
       return;
     }
 
-    final reply = replyPtr.cast<redictReply>();
+    final reply = replyPtr.cast<redisReply>();
 
     // Check if this is a pub/sub message
-    if (reply.ref.type == REDICT_REPLY_ARRAY && reply.ref.elements >= 3) {
+    if (reply.ref.type == REDIS_REPLY_ARRAY && reply.ref.elements >= 3) {
       final firstElem = reply.ref.element[0];
-      if (firstElem.ref.type == REDICT_REPLY_STRING) {
+      if (firstElem.ref.type == REDIS_REPLY_STRING) {
         final typeStr = firstElem.ref.str
             .cast<Utf8>()
             .toDartString()
@@ -539,7 +539,7 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
 
   final callback =
       NativeCallable<
-        Void Function(Pointer<redictAsyncContext>, Pointer<Void>, Pointer<Void>)
+        Void Function(Pointer<redisAsyncContext>, Pointer<Void>, Pointer<Void>)
       >.listener(onReply);
 
   var running = true;
@@ -550,9 +550,9 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
     pollTimer?.cancel();
     // First disconnect, then free the context.
     // Note: We don't close the callback before freeing because
-    // redictAsyncFree may invoke callbacks during cleanup.
-    bindings.redictAsyncDisconnect(ctx);
-    bindings.redictAsyncFree(ctx);
+    // redisAsyncFree may invoke callbacks during cleanup.
+    bindings.redisAsyncDisconnect(ctx);
+    bindings.redisAsyncFree(ctx);
     callback.close();
     commandPort.close();
   }
@@ -581,7 +581,7 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
         final privdata = nextPrivdata++;
         pendingCallbacks[privdata] = message.commandId;
 
-        bindings.redictAsyncCommandArgv(
+        bindings.redisAsyncCommandArgv(
           ctx,
           callback.nativeFunction.cast(),
           Pointer<Void>.fromAddress(privdata),
@@ -613,7 +613,7 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
 
 void _handlePubSubReply(
   SendPort replyPort,
-  Pointer<redictReply> reply,
+  Pointer<redisReply> reply,
   String type,
   HiredisBindings bindings,
 ) {

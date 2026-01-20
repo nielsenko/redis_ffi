@@ -6,20 +6,20 @@ import 'hiredis_bindings.g.dart';
 
 /// The type of a Redis reply.
 enum RedisReplyType {
-  string(REDICT_REPLY_STRING),
-  array(REDICT_REPLY_ARRAY),
-  integer(REDICT_REPLY_INTEGER),
-  nil(REDICT_REPLY_NIL),
-  status(REDICT_REPLY_STATUS),
-  error(REDICT_REPLY_ERROR),
-  double_(REDICT_REPLY_DOUBLE),
-  bool_(REDICT_REPLY_BOOL),
-  map(REDICT_REPLY_MAP),
-  set(REDICT_REPLY_SET),
-  attr(REDICT_REPLY_ATTR),
-  push(REDICT_REPLY_PUSH),
-  bignum(REDICT_REPLY_BIGNUM),
-  verb(REDICT_REPLY_VERB);
+  string(REDIS_REPLY_STRING),
+  array(REDIS_REPLY_ARRAY),
+  integer(REDIS_REPLY_INTEGER),
+  nil(REDIS_REPLY_NIL),
+  status(REDIS_REPLY_STATUS),
+  error(REDIS_REPLY_ERROR),
+  double_(REDIS_REPLY_DOUBLE),
+  bool_(REDIS_REPLY_BOOL),
+  map(REDIS_REPLY_MAP),
+  set(REDIS_REPLY_SET),
+  attr(REDIS_REPLY_ATTR),
+  push(REDIS_REPLY_PUSH),
+  bignum(REDIS_REPLY_BIGNUM),
+  verb(REDIS_REPLY_VERB);
 
   const RedisReplyType(this.value);
   final int value;
@@ -54,7 +54,7 @@ final class RedisReply implements Finalizable {
 
   final HiredisBindings _bindings;
   final DynamicLibrary _dylib;
-  final Pointer<redictReply> _reply;
+  final Pointer<redisReply> _reply;
   bool _freed = false;
 
   /// Creates a RedisReply wrapper around a native reply pointer.
@@ -75,7 +75,7 @@ final class RedisReply implements Finalizable {
     Pointer<Void> pointer,
   ) {
     if (pointer == nullptr) return null;
-    return RedisReply._(bindings, dylib, pointer.cast<redictReply>());
+    return RedisReply._(bindings, dylib, pointer.cast<redisReply>());
   }
 
   /// The type of this reply.

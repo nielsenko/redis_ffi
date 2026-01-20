@@ -2,57 +2,75 @@
  * Copyright (c) 2009-2011, Salvatore Sanfilippo <antirez at gmail dot com>
  * Copyright (c) 2010-2011, Pieter Noordhuis <pcnoordhuis at gmail dot com>
  *
- * SPDX-FileCopyrightText: 2024 Hiredict Contributors
- * SPDX-FileCopyrightText: 2024 Salvatore Sanfilippo <antirez at gmail dot com>
- * SPDX-FileCopyrightText: 2024 Pieter Noordhuis <pcnoordhuis at gmail dot com>
+ * All rights reserved.
  *
- * SPDX-License-Identifier: BSD-3-Clause
- * SPDX-License-Identifier: LGPL-3.0-or-later
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
+ *   * Redistributions of source code must retain the above copyright notice,
+ *     this list of conditions and the following disclaimer.
+ *   * Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in the
+ *     documentation and/or other materials provided with the distribution.
+ *   * Neither the name of Redis nor the names of its contributors may be used
+ *     to endorse or promote products derived from this software without
+ *     specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __HIREDICT_ASYNC_H
-#define __HIREDICT_ASYNC_H
-#include "hiredict.h"
+#ifndef __HIREDIS_ASYNC_H
+#define __HIREDIS_ASYNC_H
+#include "hiredis.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-struct redictAsyncContext; /* need forward declaration of redictAsyncContext */
+struct redisAsyncContext; /* need forward declaration of redisAsyncContext */
 struct dict; /* dictionary header is included in async.c */
 
 /* Reply callback prototype and container */
-typedef void (redictCallbackFn)(struct redictAsyncContext*, void*, void*);
-typedef struct redictCallback {
-    struct redictCallback *next; /* simple singly linked list */
-    redictCallbackFn *fn;
+typedef void (redisCallbackFn)(struct redisAsyncContext*, void*, void*);
+typedef struct redisCallback {
+    struct redisCallback *next; /* simple singly linked list */
+    redisCallbackFn *fn;
     int pending_subs;
     int unsubscribe_sent;
     void *privdata;
-} redictCallback;
+} redisCallback;
 
 /* List of callbacks for either regular replies or pub/sub */
-typedef struct redictCallbackList {
-    redictCallback *head, *tail;
-} redictCallbackList;
+typedef struct redisCallbackList {
+    redisCallback *head, *tail;
+} redisCallbackList;
 
 /* Connection callback prototypes */
-typedef void (redictDisconnectCallback)(const struct redictAsyncContext*, int status);
-typedef void (redictConnectCallback)(const struct redictAsyncContext*, int status);
-typedef void (redictConnectCallbackNC)(struct redictAsyncContext*, int status);
-typedef void (redictTimerCallback)(void *timer, void *privdata);
+typedef void (redisDisconnectCallback)(const struct redisAsyncContext*, int status);
+typedef void (redisConnectCallback)(const struct redisAsyncContext*, int status);
+typedef void (redisConnectCallbackNC)(struct redisAsyncContext *, int status);
+typedef void(redisTimerCallback)(void *timer, void *privdata);
 
-/* Context for an async connection to Redict */
-typedef struct redictAsyncContext {
+/* Context for an async connection to Redis */
+typedef struct redisAsyncContext {
     /* Hold the regular context, so it can be realloc'ed. */
-    redictContext c;
+    redisContext c;
 
     /* Setup error flags so they can be used directly. */
     int err;
     char *errstr;
 
-    /* Not used by hiredict */
+    /* Not used by hiredis */
     void *data;
     void (*dataCleanup)(void *privdata);
 
@@ -71,15 +89,15 @@ typedef struct redictAsyncContext {
     } ev;
 
     /* Called when either the connection is terminated due to an error or per
-     * user request. The status is set accordingly (REDICT_OK, REDICT_ERR). */
-    redictDisconnectCallback *onDisconnect;
+     * user request. The status is set accordingly (REDIS_OK, REDIS_ERR). */
+    redisDisconnectCallback *onDisconnect;
 
     /* Called when the first write event was received. */
-    redictConnectCallback *onConnect;
-    redictConnectCallbackNC *onConnectNC;
+    redisConnectCallback *onConnect;
+    redisConnectCallbackNC *onConnectNC;
 
     /* Regular command callbacks */
-    redictCallbackList replies;
+    redisCallbackList replies;
 
     /* Address used for connect() */
     struct sockaddr *saddr;
@@ -87,45 +105,45 @@ typedef struct redictAsyncContext {
 
     /* Subscription callbacks */
     struct {
-        redictCallbackList replies;
+        redisCallbackList replies;
         struct dict *channels;
         struct dict *patterns;
         int pending_unsubs;
     } sub;
 
     /* Any configured RESP3 PUSH handler */
-    redictAsyncPushFn *push_cb;
-} redictAsyncContext;
+    redisAsyncPushFn *push_cb;
+} redisAsyncContext;
 
-/* Functions that proxy to hiredict */
-redictAsyncContext *redictAsyncConnectWithOptions(const redictOptions *options);
-redictAsyncContext *redictAsyncConnect(const char *ip, int port);
-redictAsyncContext *redictAsyncConnectBind(const char *ip, int port, const char *source_addr);
-redictAsyncContext *redictAsyncConnectBindWithReuse(const char *ip, int port,
+/* Functions that proxy to hiredis */
+redisAsyncContext *redisAsyncConnectWithOptions(const redisOptions *options);
+redisAsyncContext *redisAsyncConnect(const char *ip, int port);
+redisAsyncContext *redisAsyncConnectBind(const char *ip, int port, const char *source_addr);
+redisAsyncContext *redisAsyncConnectBindWithReuse(const char *ip, int port,
                                                   const char *source_addr);
-redictAsyncContext *redictAsyncConnectUnix(const char *path);
-int redictAsyncSetConnectCallback(redictAsyncContext *ac, redictConnectCallback *fn);
-int redictAsyncSetConnectCallbackNC(redictAsyncContext *ac, redictConnectCallbackNC *fn);
-int redictAsyncSetDisconnectCallback(redictAsyncContext *ac, redictDisconnectCallback *fn);
+redisAsyncContext *redisAsyncConnectUnix(const char *path);
+int redisAsyncSetConnectCallback(redisAsyncContext *ac, redisConnectCallback *fn);
+int redisAsyncSetConnectCallbackNC(redisAsyncContext *ac, redisConnectCallbackNC *fn);
+int redisAsyncSetDisconnectCallback(redisAsyncContext *ac, redisDisconnectCallback *fn);
 
-redictAsyncPushFn *redictAsyncSetPushCallback(redictAsyncContext *ac, redictAsyncPushFn *fn);
-int redictAsyncSetTimeout(redictAsyncContext *ac, struct timeval tv);
-void redictAsyncDisconnect(redictAsyncContext *ac);
-void redictAsyncFree(redictAsyncContext *ac);
+redisAsyncPushFn *redisAsyncSetPushCallback(redisAsyncContext *ac, redisAsyncPushFn *fn);
+int redisAsyncSetTimeout(redisAsyncContext *ac, struct timeval tv);
+void redisAsyncDisconnect(redisAsyncContext *ac);
+void redisAsyncFree(redisAsyncContext *ac);
 
 /* Handle read/write events */
-void redictAsyncHandleRead(redictAsyncContext *ac);
-void redictAsyncHandleWrite(redictAsyncContext *ac);
-void redictAsyncHandleTimeout(redictAsyncContext *ac);
-void redictAsyncRead(redictAsyncContext *ac);
-void redictAsyncWrite(redictAsyncContext *ac);
+void redisAsyncHandleRead(redisAsyncContext *ac);
+void redisAsyncHandleWrite(redisAsyncContext *ac);
+void redisAsyncHandleTimeout(redisAsyncContext *ac);
+void redisAsyncRead(redisAsyncContext *ac);
+void redisAsyncWrite(redisAsyncContext *ac);
 
 /* Command functions for an async context. Write the command to the
  * output buffer and register the provided callback. */
-int redictvAsyncCommand(redictAsyncContext *ac, redictCallbackFn *fn, void *privdata, const char *format, va_list ap);
-int redictAsyncCommand(redictAsyncContext *ac, redictCallbackFn *fn, void *privdata, const char *format, ...);
-int redictAsyncCommandArgv(redictAsyncContext *ac, redictCallbackFn *fn, void *privdata, int argc, const char **argv, const size_t *argvlen);
-int redictAsyncFormattedCommand(redictAsyncContext *ac, redictCallbackFn *fn, void *privdata, const char *cmd, size_t len);
+int redisvAsyncCommand(redisAsyncContext *ac, redisCallbackFn *fn, void *privdata, const char *format, va_list ap);
+int redisAsyncCommand(redisAsyncContext *ac, redisCallbackFn *fn, void *privdata, const char *format, ...);
+int redisAsyncCommandArgv(redisAsyncContext *ac, redisCallbackFn *fn, void *privdata, int argc, const char **argv, const size_t *argvlen);
+int redisAsyncFormattedCommand(redisAsyncContext *ac, redisCallbackFn *fn, void *privdata, const char *cmd, size_t len);
 
 #ifdef __cplusplus
 }

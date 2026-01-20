@@ -1,25 +1,25 @@
 name: HiredisBindings
-description: FFI bindings for hiredict (hiredis fork) C library
+description: FFI bindings for hiredis C library
 output: lib/src/hiredis_bindings.g.dart
 headers:
   entry-points:
-    - native/lib/macos-x64/include/hiredict.h
-    - native/lib/macos-x64/include/async.h
+    - native/zig-out/include/hiredis.h
+    - native/zig-out/include/async.h
     - native/src/async_loop.h
   include-directives:
-    - native/lib/macos-x64/include/hiredict.h
-    - native/lib/macos-x64/include/async.h
-    - native/lib/macos-x64/include/read.h
-    - native/lib/macos-x64/include/sds.h
-    - native/lib/macos-x64/include/alloc.h
+    - native/zig-out/include/hiredis.h
+    - native/zig-out/include/async.h
+    - native/zig-out/include/read.h
+    - native/zig-out/include/sds.h
+    - native/zig-out/include/alloc.h
     - native/src/async_loop.h
 compiler-opts:
-  - "-Inative/lib/macos-x64/include"
+  - "-Inative/zig-out/include"
 
-# Include all redict functions and our async loop functions
+# Include all redis functions and our async loop functions
 functions:
   include:
-    - "redict.*"
+    - "redis.*"
     - "freeReplyObject"
     - "sds.*"
     - "redis_async_.*"
@@ -27,11 +27,11 @@ functions:
 # Include relevant structs
 structs:
   include:
-    - "redictContext"
-    - "redictReply"
-    - "redictOptions"
-    - "redictReader"
-    - "redictAsyncContext"
+    - "redisContext"
+    - "redisReply"
+    - "redisOptions"
+    - "redisReader"
+    - "redisAsyncContext"
 
 # Include all enums
 enums:
@@ -41,6 +41,5 @@ enums:
 # Include relevant macros (constants)
 macros:
   include:
-    - "REDICT_.*"
-    - "HIREDICT_.*"
-    - "REDIS_POLL_.*"
+    - "REDIS_.*"
+    - "HIREDIS_.*"

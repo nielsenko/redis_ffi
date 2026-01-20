@@ -8,7 +8,7 @@ const builtin = @import("builtin");
 
 // Import hiredis types via C interop
 const c = @cImport({
-    @cInclude("hiredict.h");
+    @cInclude("hiredis.h");
     @cInclude("async.h");
 });
 
@@ -37,7 +37,7 @@ pub const PollResult = enum(c_int) {
 /// - `timeout` (0) if timeout expired with no activity
 /// - `err` (-1) on poll error
 /// - `closed` (-2) if the connection is closed or fd is invalid
-export fn redis_async_poll(ctx: ?*c.redictAsyncContext, timeout_ms: c_int) PollResult {
+export fn redis_async_poll(ctx: ?*c.redisAsyncContext, timeout_ms: c_int) PollResult {
     const async_ctx = ctx orelse return .err;
 
     const fd = async_ctx.c.fd;
@@ -74,10 +74,10 @@ export fn redis_async_poll(ctx: ?*c.redictAsyncContext, timeout_ms: c_int) PollR
 
     // Handle I/O
     if (revents & std.posix.POLL.IN != 0) {
-        c.redictAsyncHandleRead(async_ctx);
+        c.redisAsyncHandleRead(async_ctx);
     }
     if (revents & std.posix.POLL.OUT != 0) {
-        c.redictAsyncHandleWrite(async_ctx);
+        c.redisAsyncHandleWrite(async_ctx);
     }
 
     return .activity;
@@ -92,13 +92,13 @@ export fn redis_async_poll(ctx: ?*c.redictAsyncContext, timeout_ms: c_int) PollR
 ///
 /// The `poll_interval_ms` controls how often to check for stop requests
 /// between I/O operations.
-export fn redis_async_run_loop(ctx: ?*c.redictAsyncContext, poll_interval_ms: c_int) void {
+export fn redis_async_run_loop(ctx: ?*c.redisAsyncContext, poll_interval_ms: c_int) void {
     const async_ctx = ctx orelse return;
 
     while (true) {
         // Check if we should stop (context disconnected or freed)
         if (async_ctx.c.fd < 0) break;
-        if (async_ctx.c.flags & c.REDICT_DISCONNECTING != 0) break;
+        if (async_ctx.c.flags & c.REDIS_DISCONNECTING != 0) break;
 
         const result = redis_async_poll(ctx, poll_interval_ms);
         switch (result) {
@@ -110,22 +110,22 @@ export fn redis_async_run_loop(ctx: ?*c.redictAsyncContext, poll_interval_ms: c_
 
 /// Gets the file descriptor from an async context.
 /// Returns -1 if the context is null or disconnected.
-export fn redis_async_get_fd(ctx: ?*c.redictAsyncContext) c_int {
+export fn redis_async_get_fd(ctx: ?*c.redisAsyncContext) c_int {
     const async_ctx = ctx orelse return -1;
     return async_ctx.c.fd;
 }
 
 /// Checks if the async context is connected.
-export fn redis_async_is_connected(ctx: ?*c.redictAsyncContext) bool {
+export fn redis_async_is_connected(ctx: ?*c.redisAsyncContext) bool {
     const async_ctx = ctx orelse return false;
     if (async_ctx.c.fd < 0) return false;
-    if (async_ctx.c.flags & c.REDICT_CONNECTED == 0) return false;
-    if (async_ctx.c.flags & c.REDICT_DISCONNECTING != 0) return false;
+    if (async_ctx.c.flags & c.REDIS_CONNECTED == 0) return false;
+    if (async_ctx.c.flags & c.REDIS_DISCONNECTING != 0) return false;
     return true;
 }
 
 /// Forces a write flush - sends any pending commands immediately.
-export fn redis_async_flush(ctx: ?*c.redictAsyncContext) void {
+export fn redis_async_flush(ctx: ?*c.redisAsyncContext) void {
     const async_ctx = ctx orelse return;
-    c.redictAsyncHandleWrite(async_ctx);
+    c.redisAsyncHandleWrite(async_ctx);
 }

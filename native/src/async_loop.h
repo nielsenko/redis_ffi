@@ -29,7 +29,7 @@ typedef enum {
 /// @param ctx The async context to poll.
 /// @param timeout_ms Timeout in milliseconds. Use -1 for infinite wait.
 /// @return Poll result code.
-RedisPollResult redis_async_poll(redictAsyncContext *ctx, int timeout_ms);
+RedisPollResult redis_async_poll(redisAsyncContext *ctx, int timeout_ms);
 
 /// Starts a polling loop in the current thread.
 ///
@@ -39,18 +39,18 @@ RedisPollResult redis_async_poll(redictAsyncContext *ctx, int timeout_ms);
 ///
 /// @param ctx The async context to run the loop for.
 /// @param poll_interval_ms Timeout for each poll iteration.
-void redis_async_run_loop(redictAsyncContext *ctx, int poll_interval_ms);
+void redis_async_run_loop(redisAsyncContext *ctx, int poll_interval_ms);
 
 /// Gets the file descriptor from an async context.
 /// @return The fd, or -1 if the context is null or disconnected.
-int redis_async_get_fd(redictAsyncContext *ctx);
+int redis_async_get_fd(redisAsyncContext *ctx);
 
 /// Checks if the async context is connected.
 /// @return true if connected, false otherwise.
-bool redis_async_is_connected(redictAsyncContext *ctx);
+bool redis_async_is_connected(redisAsyncContext *ctx);
 
 /// Forces a write flush - sends any pending commands immediately.
-void redis_async_flush(redictAsyncContext *ctx);
+void redis_async_flush(redisAsyncContext *ctx);
 
 #ifdef __cplusplus
 }

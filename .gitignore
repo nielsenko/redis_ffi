@@ -9,3 +9,4 @@ pubspec.lock
 # Zig build artifacts
 native/.zig-cache/
 native/zig-out/
+dump.rdb

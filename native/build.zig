@@ -4,17 +4,14 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Fetch hiredict dependency to get the C source files
-    const hiredict_dep = b.dependency("hiredict", .{});
+    // Fetch hiredis dependency directly from redis/hiredis
+    const hiredis_dep = b.dependency("hiredis", .{});
+    const hiredis_path = hiredis_dep.path(".");
 
-    // Get the upstream hiredict sources (hiredict depends on the actual hiredict C library)
-    const upstream_dep = hiredict_dep.builder.dependency("hiredict", .{});
-    const upstream_path = upstream_dep.path(".");
-
-    const hiredict_source_files = &[_][]const u8{
+    const hiredis_source_files = &[_][]const u8{
         "alloc.c",
         "async.c",
-        "hiredict.c",
+        "hiredis.c",
         "net.c",
         "read.c",
         "sds.c",
@@ -40,15 +37,15 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
 
-    // Add hiredict C sources
+    // Add hiredis C sources
     shared_lib.addCSourceFiles(.{
-        .root = upstream_path,
-        .files = hiredict_source_files,
+        .root = hiredis_path,
+        .files = hiredis_source_files,
         .flags = cflags,
     });
 
-    // Include paths for both hiredict headers and our Zig code
-    shared_lib.addIncludePath(upstream_path);
+    // Include path for hiredis headers
+    shared_lib.addIncludePath(hiredis_path);
 
     for (platform_libs) |libname| {
         shared_lib.linkSystemLibrary(libname);
@@ -61,12 +58,12 @@ pub fn build(b: *std.Build) void {
 
     // Install headers for ffigen
     shared_lib.installHeadersDirectory(
-        upstream_path,
+        hiredis_path,
         "",
         .{ .include_extensions = &.{
             "alloc.h",
             "async.h",
-            "hiredict.h",
+            "hiredis.h",
             "net.h",
             "read.h",
             "sds.h",
@@ -86,12 +83,12 @@ pub fn build(b: *std.Build) void {
     });
 
     static_lib.addCSourceFiles(.{
-        .root = upstream_path,
-        .files = hiredict_source_files,
+        .root = hiredis_path,
+        .files = hiredis_source_files,
         .flags = cflags,
     });
 
-    static_lib.addIncludePath(upstream_path);
+    static_lib.addIncludePath(hiredis_path);
 
     for (platform_libs) |libname| {
         static_lib.linkSystemLibrary(libname);

@@ -3,9 +3,9 @@
     .version = "1.0.0",
     .fingerprint = 0xf9b29ee696881bd9,
     .dependencies = .{
-        .hiredict = .{
-            .url = "git+https://github.com/allyourcodebase/hiredict#1.3.1+1",
-            .hash = "hiredict-1.3.1-gIaDJ-MgAABsxE8C6ElESoN3_6YoHgxYW218tEWmfgq_",
+        .hiredis = .{
+            .url = "https://github.com/redis/hiredis/archive/refs/tags/v1.3.0.tar.gz",
+            .hash = "N-V-__8AAHFfCAAk2gwLWdkwhPaHXFF1_ftpKn0uUTTCk7d1",
         },
     },
     .paths = .{"."},
