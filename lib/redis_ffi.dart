@@ -22,4 +22,5 @@
 library;
 
 export 'src/redis_client.dart' show RedisClient, RedisException;
+export 'src/redis_pubsub.dart' show RedisPubSub, RedisPubSubMessage;
 export 'src/redis_reply.dart' show RedisReply, RedisReplyType;
