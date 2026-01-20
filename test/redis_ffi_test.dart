@@ -1,3 +1,5 @@
+library;
+
 import 'package:redis_ffi/redis_ffi.dart';
 import 'package:test/test.dart';
 
@@ -35,21 +37,11 @@ void main() {
     late RedisClient client;
 
     setUp(() async {
-      try {
-        client = await RedisClient.connect('localhost', 6379);
-      } on RedisException {
-        markTestSkipped('Redis server not available');
-      } on StateError {
-        markTestSkipped('Redis server not available');
-      }
+      client = await RedisClient.connect('localhost', 6379);
     });
 
     tearDown(() async {
-      try {
-        await client.close();
-      } catch (_) {
-        // Ignore errors during cleanup
-      }
+      await client.close();
     });
 
     test('ping returns PONG', () async {
@@ -129,30 +121,20 @@ void main() {
       // Cleanup
       await client.del(['pipe1', 'pipe2']);
     });
-  }, skip: 'Requires running Redis server');
+  }, tags: ['redis']);
 
   group('RedisClient pub/sub integration', () {
     late RedisClient subscriber;
     late RedisClient publisher;
 
     setUp(() async {
-      try {
-        subscriber = await RedisClient.connect('localhost', 6379);
-        publisher = await RedisClient.connect('localhost', 6379);
-      } on RedisException {
-        markTestSkipped('Redis server not available');
-      } on StateError {
-        markTestSkipped('Redis server not available');
-      }
+      subscriber = await RedisClient.connect('localhost', 6379);
+      publisher = await RedisClient.connect('localhost', 6379);
     });
 
     tearDown(() async {
-      try {
-        await subscriber.close();
-        await publisher.close();
-      } catch (_) {
-        // Ignore errors during cleanup
-      }
+      await subscriber.close();
+      await publisher.close();
     });
 
     test('can subscribe and receive messages', () async {
@@ -202,5 +184,5 @@ void main() {
 
       expect(() => subscriber.command(['PING']), throwsStateError);
     });
-  }, skip: 'Requires running Redis server');
+  }, tags: ['redis']);
 }

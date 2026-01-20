@@ -67,7 +67,6 @@ class RedisPubSubMessage {
 class RedisClient {
   final HiredisBindings _bindings;
   final DynamicLibrary _dylib;
-  final Pointer<redictAsyncContext> _ctx;
   final SendPort _commandPort;
   final Isolate _pollIsolate;
   final ReceivePort _replyPort;
@@ -81,7 +80,6 @@ class RedisClient {
   RedisClient._(
     this._bindings,
     this._dylib,
-    this._ctx,
     this._commandPort,
     this._pollIsolate,
     this._replyPort,
@@ -91,17 +89,90 @@ class RedisClient {
 
   /// Opens the hiredis dynamic library.
   static DynamicLibrary _openLibrary() {
+    final libName = _getLibraryName();
+
+    // Try standard library loading first (works when bundled by build hooks)
+    try {
+      return DynamicLibrary.open(libName);
+    } on ArgumentError {
+      // Fall through to search paths
+    }
+
+    // Search in known locations (for development/testing)
+    final searchPaths = _getSearchPaths(libName);
+    for (final path in searchPaths) {
+      final file = File(path);
+      if (file.existsSync()) {
+        return DynamicLibrary.open(path);
+      }
+    }
+
+    throw UnsupportedError(
+      'Could not find $libName. Searched: ${searchPaths.join(", ")}',
+    );
+  }
+
+  static String _getLibraryName() {
     if (Platform.isMacOS) {
-      return DynamicLibrary.open('libhiredis.dylib');
+      return 'libhiredis.dylib';
     } else if (Platform.isLinux || Platform.isAndroid) {
-      return DynamicLibrary.open('libhiredis.so');
+      return 'libhiredis.so';
     } else if (Platform.isWindows) {
-      return DynamicLibrary.open('hiredis.dll');
+      return 'hiredis.dll';
     } else {
       throw UnsupportedError(
         'Unsupported platform: ${Platform.operatingSystem}',
       );
     }
+  }
+
+  static List<String> _getSearchPaths(String libName) {
+    final paths = <String>[];
+
+    // Get the package root by finding pubspec.yaml
+    var dir = Directory.current;
+    while (dir.path != dir.parent.path) {
+      final pubspec = File('${dir.path}/pubspec.yaml');
+      if (pubspec.existsSync()) {
+        final arch = _getArch();
+        final os = _getOS();
+        // Prebuilt location
+        paths.add('${dir.path}/native/lib/$os-$arch/lib/$libName');
+        // Zig build output
+        paths.add('${dir.path}/native/zig-out/lib/$libName');
+        // Dart tool location (from build hooks)
+        paths.add('${dir.path}/.dart_tool/lib/$libName');
+        break;
+      }
+      dir = dir.parent;
+    }
+
+    return paths;
+  }
+
+  static String _getArch() {
+    // Use Dart's sizeOf to detect architecture
+    final pointerSize = sizeOf<IntPtr>();
+    if (pointerSize == 8) {
+      // Check for ARM64 on macOS
+      if (Platform.isMacOS) {
+        final result = Process.runSync('uname', ['-m']);
+        if (result.stdout.toString().trim() == 'arm64') {
+          return 'arm64';
+        }
+      }
+      return 'x64';
+    }
+    return 'x86';
+  }
+
+  static String _getOS() {
+    if (Platform.isMacOS) return 'macos';
+    if (Platform.isLinux) return 'linux';
+    if (Platform.isWindows) return 'windows';
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isIOS) return 'ios';
+    return 'unknown';
   }
 
   /// Connects to a Redis server.
@@ -164,7 +235,6 @@ class RedisClient {
         final client = RedisClient._(
           bindings,
           dylib,
-          ctx,
           commandPort,
           isolate,
           replyPort,
@@ -342,10 +412,13 @@ class RedisClient {
     if (_closed) return;
     _closed = true;
 
-    // Tell the isolate to stop
+    // Tell the isolate to stop and clean up (it will free the context)
     _commandPort.send(null);
 
-    // Clean up
+    // Give the isolate time to clean up
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    // Clean up on our side
     await _replySubscription.cancel();
     _replyPort.close();
     _pollIsolate.kill();
@@ -357,8 +430,8 @@ class RedisClient {
     }
     _pendingCommands.clear();
 
-    // Free the context
-    _bindings.redictAsyncFree(_ctx);
+    // Note: The isolate is responsible for calling redictAsyncFree
+    // after closing the NativeCallable
   }
 }
 
@@ -470,25 +543,38 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
       >.listener(onReply);
 
   var running = true;
+  Timer? pollTimer;
+
+  void cleanup() {
+    running = false;
+    pollTimer?.cancel();
+    // First disconnect, then free the context.
+    // Note: We don't close the callback before freeing because
+    // redictAsyncFree may invoke callbacks during cleanup.
+    bindings.redictAsyncDisconnect(ctx);
+    bindings.redictAsyncFree(ctx);
+    callback.close();
+    commandPort.close();
+  }
 
   // Listen for commands from main isolate
   commandPort.listen((message) {
     if (message == null) {
-      running = false;
+      cleanup();
       return;
     }
 
     if (message is _CommandMessage) {
-      final args = message.args;
-      final argc = args.length;
+      final cmdArgs = message.args;
+      final argc = cmdArgs.length;
       final argv = calloc<Pointer<Char>>(argc);
       final argvlen = calloc<Size>(argc);
 
       try {
         for (var i = 0; i < argc; i++) {
-          final arg = args[i].toNativeUtf8();
+          final arg = cmdArgs[i].toNativeUtf8();
           argv[i] = arg.cast();
-          argvlen[i] = args[i].length;
+          argvlen[i] = cmdArgs[i].length;
         }
 
         // Use privdata to track which command this reply is for
@@ -519,7 +605,7 @@ void _pollIsolateEntry(_PollIsolateArgs args) {
   });
 
   // Poll loop
-  Timer.periodic(const Duration(milliseconds: 1), (_) {
+  pollTimer = Timer.periodic(const Duration(milliseconds: 1), (_) {
     if (!running) return;
     bindings.redis_async_poll(ctx, 0);
   });

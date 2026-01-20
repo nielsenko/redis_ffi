@@ -1,0 +1,18 @@
+# Test configuration for redis_ffi
+#
+# By default, tests tagged with 'redis' are excluded because they require
+# a running Redis server.
+#
+# To run all tests including Redis integration tests:
+#   dart test -t redis
+#
+# Or run only Redis tests:
+#   dart test --tags redis
+#
+# To start a Redis server for testing:
+#   redis-server --daemonize yes --port 6379
+
+tags:
+  redis:
+    # Skip redis-tagged tests by default
+    skip: "Requires running Redis server. Run with: dart test -t redis"
