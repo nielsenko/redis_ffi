@@ -1320,6 +1320,264 @@ class RedisClient {
     }
   }
 
+  // ============ List Commands ============
+
+  /// Pushes values to the left (head) of a list.
+  ///
+  /// Returns the length of the list after the push.
+  Future<int> lpush(String key, List<String> values) async {
+    final reply = await command(['LPUSH', key, ...values]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Pushes values to the right (tail) of a list.
+  ///
+  /// Returns the length of the list after the push.
+  Future<int> rpush(String key, List<String> values) async {
+    final reply = await command(['RPUSH', key, ...values]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Pushes a value to the left of a list only if the list exists.
+  ///
+  /// Returns the length of the list after the push, or 0 if the list doesn't
+  /// exist.
+  Future<int> lpushx(String key, List<String> values) async {
+    final reply = await command(['LPUSHX', key, ...values]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Pushes a value to the right of a list only if the list exists.
+  ///
+  /// Returns the length of the list after the push, or 0 if the list doesn't
+  /// exist.
+  Future<int> rpushx(String key, List<String> values) async {
+    final reply = await command(['RPUSHX', key, ...values]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes and returns the first element of a list.
+  Future<String?> lpop(String key) async {
+    final reply = await command(['LPOP', key]);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes and returns the last element of a list.
+  Future<String?> rpop(String key) async {
+    final reply = await command(['RPOP', key]);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes and returns multiple elements from the left of a list.
+  Future<List<String>> lpopCount(String key, int count) async {
+    final reply = await command(['LPOP', key, count.toString()]);
+    try {
+      final result = <String>[];
+      if (reply == null) return result;
+
+      // Single element returned as string, multiple as array
+      if (reply.string != null) {
+        result.add(reply.string!);
+      } else {
+        for (var i = 0; i < reply.length; i++) {
+          final item = reply[i]?.string;
+          if (item != null) result.add(item);
+        }
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes and returns multiple elements from the right of a list.
+  Future<List<String>> rpopCount(String key, int count) async {
+    final reply = await command(['RPOP', key, count.toString()]);
+    try {
+      final result = <String>[];
+      if (reply == null) return result;
+
+      if (reply.string != null) {
+        result.add(reply.string!);
+      } else {
+        for (var i = 0; i < reply.length; i++) {
+          final item = reply[i]?.string;
+          if (item != null) result.add(item);
+        }
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns a range of elements from a list.
+  ///
+  /// [start] and [stop] are zero-based indices. Negative indices count from
+  /// the end (-1 is the last element).
+  Future<List<String>> lrange(String key, int start, int stop) async {
+    final reply = await command([
+      'LRANGE',
+      key,
+      start.toString(),
+      stop.toString(),
+    ]);
+    try {
+      final result = <String>[];
+      if (reply == null) return result;
+
+      for (var i = 0; i < reply.length; i++) {
+        final item = reply[i]?.string;
+        if (item != null) result.add(item);
+      }
+      return result;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the element at [index] in the list.
+  ///
+  /// Negative indices count from the end (-1 is the last element).
+  Future<String?> lindex(String key, int index) async {
+    final reply = await command(['LINDEX', key, index.toString()]);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Sets the element at [index] in the list.
+  Future<void> lset(String key, int index, String value) async {
+    final reply = await command(['LSET', key, index.toString(), value]);
+    try {
+      // LSET returns OK on success
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the length of a list.
+  Future<int> llen(String key) async {
+    final reply = await command(['LLEN', key]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Inserts an element before or after a pivot element.
+  ///
+  /// Returns the length of the list after the insert, or -1 if the pivot
+  /// was not found, or 0 if the key doesn't exist.
+  Future<int> linsert(
+    String key,
+    String pivot,
+    String value, {
+    required bool before,
+  }) async {
+    final position = before ? 'BEFORE' : 'AFTER';
+    final reply = await command(['LINSERT', key, position, pivot, value]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Removes [count] occurrences of [value] from the list.
+  ///
+  /// - count > 0: Remove from head to tail
+  /// - count < 0: Remove from tail to head
+  /// - count = 0: Remove all occurrences
+  ///
+  /// Returns the number of removed elements.
+  Future<int> lrem(String key, int count, String value) async {
+    final reply = await command(['LREM', key, count.toString(), value]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Trims a list to the specified range.
+  Future<void> ltrim(String key, int start, int stop) async {
+    final reply = await command([
+      'LTRIM',
+      key,
+      start.toString(),
+      stop.toString(),
+    ]);
+    try {
+      // LTRIM returns OK
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Atomically moves an element from one list to another.
+  ///
+  /// [srcDirection] and [dstDirection] can be 'LEFT' or 'RIGHT'.
+  Future<String?> lmove(
+    String source,
+    String destination, {
+    required String srcDirection,
+    required String dstDirection,
+  }) async {
+    final reply = await command([
+      'LMOVE',
+      source,
+      destination,
+      srcDirection,
+      dstDirection,
+    ]);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the index of the first matching element in a list.
+  ///
+  /// Returns null if the element is not found.
+  Future<int?> lpos(String key, String element) async {
+    final reply = await command(['LPOS', key, element]);
+    try {
+      if (reply == null || reply.isNil) return null;
+      return reply.integer;
+    } finally {
+      reply?.free();
+    }
+  }
+
   /// Executes multiple commands in a pipeline.
   ///
   /// All commands are sent at once, and results are returned in order.
