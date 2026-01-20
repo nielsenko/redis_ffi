@@ -1,0 +1,346 @@
+/*
+ * Copyright (c) 2009-2011, Salvatore Sanfilippo <antirez at gmail dot com>
+ * Copyright (c) 2010-2014, Pieter Noordhuis <pcnoordhuis at gmail dot com>
+ * Copyright (c) 2015, Matt Stancliff <matt at genges dot com>,
+ *                     Jan-Erik Rediger <janerik at fnordig dot com>
+ *
+ * SPDX-FileCopyrightText: 2024 Hiredict Contributors
+ * SPDX-FileCopyrightText: 2024 Salvatore Sanfilippo <antirez at gmail dot com>
+ * SPDX-FileCopyrightText: 2024 Pieter Noordhuis <pcnoordhuis at gmail dot com>
+ * SPDX-FileCopyrightText: 2024 Matt Stancliff <matt at genges dot com>
+ * SPDX-FileCopyrightText: 2024 Jan-Erik Rediger <janerik at fnordig dot com>
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ *
+ */
+
+#ifndef __HIREDICT_H
+#define __HIREDICT_H
+#include "read.h"
+#include <stdarg.h> /* for va_list */
+#ifndef _MSC_VER
+#include <sys/time.h> /* for struct timeval */
+#else
+struct timeval; /* forward declaration */
+typedef long long ssize_t;
+#endif
+#include <stdint.h> /* uintXX_t, etc */
+#include "sds.h" /* for sds */
+#include "alloc.h" /* for allocation wrappers */
+
+#define HIREDICT_MAJOR 1
+#define HIREDICT_MINOR 3
+#define HIREDICT_PATCH 1
+#define HIREDICT_SONAME 1.3.1
+
+/* Connection type can be blocking or non-blocking and is set in the
+ * least significant bit of the flags field in redictContext. */
+#define REDICT_BLOCK 0x1
+
+/* Connection may be disconnected before being free'd. The second bit
+ * in the flags field is set when the context is connected. */
+#define REDICT_CONNECTED 0x2
+
+/* The async API might try to disconnect cleanly and flush the output
+ * buffer and read all subsequent replies before disconnecting.
+ * This flag means no new commands can come in and the connection
+ * should be terminated once all replies have been read. */
+#define REDICT_DISCONNECTING 0x4
+
+/* Flag specific to the async API which means that the context should be clean
+ * up as soon as possible. */
+#define REDICT_FREEING 0x8
+
+/* Flag that is set when an async callback is executed. */
+#define REDICT_IN_CALLBACK 0x10
+
+/* Flag that is set when the async context has one or more subscriptions. */
+#define REDICT_SUBSCRIBED 0x20
+
+/* Flag that is set when monitor mode is active */
+#define REDICT_MONITORING 0x40
+
+/* Flag that is set when we should set SO_REUSEADDR before calling bind() */
+#define REDICT_REUSEADDR 0x80
+
+/* Flag that is set when the async connection supports push replies. */
+#define REDICT_SUPPORTS_PUSH 0x100
+
+/**
+ * Flag that indicates the user does not want the context to
+ * be automatically freed upon error
+ */
+#define REDICT_NO_AUTO_FREE 0x200
+
+/* Flag that indicates the user does not want replies to be automatically freed */
+#define REDICT_NO_AUTO_FREE_REPLIES 0x400
+
+/* Flags to prefer IPv6 or IPv4 when doing DNS lookup. (If both are set,
+ * AF_UNSPEC is used.) */
+#define REDICT_PREFER_IPV4 0x800
+#define REDICT_PREFER_IPV6 0x1000
+
+#define REDICT_KEEPALIVE_INTERVAL 15 /* seconds */
+
+/* number of times we retry to connect in the case of EADDRNOTAVAIL and
+ * SO_REUSEADDR is being used. */
+#define REDICT_CONNECT_RETRIES  10
+
+/* Forward declarations for structs defined elsewhere */
+struct redictAsyncContext;
+struct redictContext;
+
+/* RESP3 push helpers and callback prototypes */
+#define redictIsPushReply(r) (((redictReply*)(r))->type == REDICT_REPLY_PUSH)
+typedef void (redictPushFn)(void *, void *);
+typedef void (redictAsyncPushFn)(struct redictAsyncContext *, void *);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* This is the reply object returned by redictCommand() */
+typedef struct redictReply {
+    int type; /* REDICT_REPLY_* */
+    long long integer; /* The integer when type is REDICT_REPLY_INTEGER */
+    double dval; /* The double when type is REDICT_REPLY_DOUBLE */
+    size_t len; /* Length of string */
+    char *str; /* Used for REDICT_REPLY_ERROR, REDICT_REPLY_STRING
+                  REDICT_REPLY_VERB, REDICT_REPLY_DOUBLE (in additional to dval),
+                  and REDICT_REPLY_BIGNUM. */
+    char vtype[4]; /* Used for REDICT_REPLY_VERB, contains the null
+                      terminated 3 character content type, such as "txt". */
+    size_t elements; /* number of elements, for REDICT_REPLY_ARRAY */
+    struct redictReply **element; /* elements vector for REDICT_REPLY_ARRAY */
+} redictReply;
+
+redictReader *redictReaderCreate(void);
+
+/* Function to free the reply objects hiredict returns by default. */
+void freeReplyObject(void *reply);
+
+/* Functions to format a command according to the protocol. */
+int redictvFormatCommand(char **target, const char *format, va_list ap);
+int redictFormatCommand(char **target, const char *format, ...);
+long long redictFormatCommandArgv(char **target, int argc, const char **argv, const size_t *argvlen);
+long long redictFormatSdsCommandArgv(sds *target, int argc, const char ** argv, const size_t *argvlen);
+void redictFreeCommand(char *cmd);
+void redictFreeSdsCommand(sds cmd);
+
+enum redictConnectionType {
+    REDICT_CONN_TCP,
+    REDICT_CONN_UNIX,
+    REDICT_CONN_USERFD
+};
+
+struct redictSsl;
+
+#define REDICT_OPT_NONBLOCK 0x01
+#define REDICT_OPT_REUSEADDR 0x02
+#define REDICT_OPT_NOAUTOFREE 0x04        /* Don't automatically free the async
+                                          * object on a connection failure, or
+                                          * other implicit conditions. Only free
+                                          * on an explicit call to disconnect()
+                                          * or free() */
+#define REDICT_OPT_NO_PUSH_AUTOFREE 0x08  /* Don't automatically intercept and
+                                          * free RESP3 PUSH replies. */
+#define REDICT_OPT_NOAUTOFREEREPLIES 0x10 /* Don't automatically free replies. */
+#define REDICT_OPT_PREFER_IPV4 0x20       /* Prefer IPv4 in DNS lookups. */
+#define REDICT_OPT_PREFER_IPV6 0x40       /* Prefer IPv6 in DNS lookups. */
+#define REDICT_OPT_PREFER_IP_UNSPEC (REDICT_OPT_PREFER_IPV4 | REDICT_OPT_PREFER_IPV6)
+
+/* In Unix systems a file descriptor is a regular signed int, with -1
+ * representing an invalid descriptor. In Windows it is a SOCKET
+ * (32- or 64-bit unsigned integer depending on the architecture), where
+ * all bits set (~0) is INVALID_SOCKET.  */
+#ifndef _WIN32
+typedef int redictFD;
+#define REDICT_INVALID_FD -1
+#else
+#ifdef _WIN64
+typedef unsigned long long redictFD; /* SOCKET = 64-bit UINT_PTR */
+#else
+typedef unsigned long redictFD;      /* SOCKET = 32-bit UINT_PTR */
+#endif
+#define REDICT_INVALID_FD ((redictFD)(~0)) /* INVALID_SOCKET */
+#endif
+
+typedef struct {
+    /*
+     * the type of connection to use. This also indicates which
+     * `endpoint` member field to use
+     */
+    int type;
+    /* bit field of REDICT_OPT_xxx */
+    int options;
+    /* timeout value for connect operation. If NULL, no timeout is used */
+    const struct timeval *connect_timeout;
+    /* timeout value for commands. If NULL, no timeout is used.  This can be
+     * updated at runtime with redictSetTimeout/redictAsyncSetTimeout. */
+    const struct timeval *command_timeout;
+    union {
+        /** use this field for tcp/ip connections */
+        struct {
+            const char *source_addr;
+            const char *ip;
+            int port;
+        } tcp;
+        /** use this field for unix domain sockets */
+        const char *unix_socket;
+        /**
+         * use this field to have hiredict operate an already-open
+         * file descriptor */
+        redictFD fd;
+    } endpoint;
+
+    /* Optional user defined data/destructor */
+    void *privdata;
+    void (*free_privdata)(void *);
+
+    /* A user defined PUSH message callback */
+    redictPushFn *push_cb;
+    redictAsyncPushFn *async_push_cb;
+} redictOptions;
+
+/**
+ * Helper macros to initialize options to their specified fields.
+ */
+#define REDICT_OPTIONS_SET_TCP(opts, ip_, port_) do { \
+        (opts)->type = REDICT_CONN_TCP;               \
+        (opts)->endpoint.tcp.ip = ip_;               \
+        (opts)->endpoint.tcp.port = port_;           \
+    } while(0)
+
+#define REDICT_OPTIONS_SET_UNIX(opts, path) do { \
+        (opts)->type = REDICT_CONN_UNIX;         \
+        (opts)->endpoint.unix_socket = path;    \
+    } while(0)
+
+#define REDICT_OPTIONS_SET_PRIVDATA(opts, data, dtor) do {  \
+        (opts)->privdata = data;                           \
+        (opts)->free_privdata = dtor;                      \
+    } while(0)
+
+typedef struct redictContextFuncs {
+    void (*close)(struct redictContext *);
+    void (*free_privctx)(void *);
+    void (*async_read)(struct redictAsyncContext *);
+    void (*async_write)(struct redictAsyncContext *);
+
+    /* Read/Write data to the underlying communication stream, returning the
+     * number of bytes read/written.  In the event of an unrecoverable error
+     * these functions shall return a value < 0.  In the event of a
+     * recoverable error, they should return 0. */
+    ssize_t (*read)(struct redictContext *, char *, size_t);
+    ssize_t (*write)(struct redictContext *);
+} redictContextFuncs;
+
+
+/* Context for a connection to Redict */
+typedef struct redictContext {
+    const redictContextFuncs *funcs;   /* Function table */
+
+    int err; /* Error flags, 0 when there is no error */
+    char errstr[128]; /* String representation of error when applicable */
+    redictFD fd;
+    int flags;
+    char *obuf; /* Write buffer */
+    redictReader *reader; /* Protocol reader */
+
+    enum redictConnectionType connection_type;
+    struct timeval *connect_timeout;
+    struct timeval *command_timeout;
+
+    struct {
+        char *host;
+        char *source_addr;
+        int port;
+    } tcp;
+
+    struct {
+        char *path;
+    } unix_sock;
+
+    /* For non-blocking connect */
+    struct sockaddr *saddr;
+    size_t addrlen;
+
+    /* Optional data and corresponding destructor users can use to provide
+     * context to a given redictContext.  Not used by hiredict. */
+    void *privdata;
+    void (*free_privdata)(void *);
+
+    /* Internal context pointer presently used by hiredict to manage
+     * SSL connections. */
+    void *privctx;
+
+    /* An optional RESP3 PUSH handler */
+    redictPushFn *push_cb;
+} redictContext;
+
+redictContext *redictConnectWithOptions(const redictOptions *options);
+redictContext *redictConnect(const char *ip, int port);
+redictContext *redictConnectWithTimeout(const char *ip, int port, const struct timeval tv);
+redictContext *redictConnectNonBlock(const char *ip, int port);
+redictContext *redictConnectBindNonBlock(const char *ip, int port,
+                                       const char *source_addr);
+redictContext *redictConnectBindNonBlockWithReuse(const char *ip, int port,
+                                                const char *source_addr);
+redictContext *redictConnectUnix(const char *path);
+redictContext *redictConnectUnixWithTimeout(const char *path, const struct timeval tv);
+redictContext *redictConnectUnixNonBlock(const char *path);
+redictContext *redictConnectFd(redictFD fd);
+
+/**
+ * Reconnect the given context using the saved information.
+ *
+ * This re-uses the exact same connect options as in the initial connection.
+ * host, ip (or path), timeout and bind address are reused,
+ * flags are used unmodified from the existing context.
+ *
+ * Returns REDICT_OK on successful connect or REDICT_ERR otherwise.
+ */
+int redictReconnect(redictContext *c);
+
+redictPushFn *redictSetPushCallback(redictContext *c, redictPushFn *fn);
+int redictSetTimeout(redictContext *c, const struct timeval tv);
+int redictEnableKeepAlive(redictContext *c);
+int redictEnableKeepAliveWithInterval(redictContext *c, int interval);
+int redictSetTcpUserTimeout(redictContext *c, unsigned int timeout);
+void redictFree(redictContext *c);
+redictFD redictFreeKeepFd(redictContext *c);
+int redictBufferRead(redictContext *c);
+int redictBufferWrite(redictContext *c, int *done);
+
+/* In a blocking context, this function first checks if there are unconsumed
+ * replies to return and returns one if so. Otherwise, it flushes the output
+ * buffer to the socket and reads until it has a reply. In a non-blocking
+ * context, it will return unconsumed replies until there are no more. */
+int redictGetReply(redictContext *c, void **reply);
+int redictGetReplyFromReader(redictContext *c, void **reply);
+
+/* Write a formatted command to the output buffer. Use these functions in blocking mode
+ * to get a pipeline of commands. */
+int redictAppendFormattedCommand(redictContext *c, const char *cmd, size_t len);
+
+/* Write a command to the output buffer. Use these functions in blocking mode
+ * to get a pipeline of commands. */
+int redictvAppendCommand(redictContext *c, const char *format, va_list ap);
+int redictAppendCommand(redictContext *c, const char *format, ...);
+int redictAppendCommandArgv(redictContext *c, int argc, const char **argv, const size_t *argvlen);
+
+/* Issue a command to Redict. In a blocking context, it is identical to calling
+ * redictAppendCommand, followed by redictGetReply. The function will return
+ * NULL if there was an error in performing the request, otherwise it will
+ * return the reply. In a non-blocking context, it is identical to calling
+ * only redictAppendCommand and will always return NULL. */
+void *redictvCommand(redictContext *c, const char *format, va_list ap);
+void *redictCommand(redictContext *c, const char *format, ...);
+void *redictCommandArgv(redictContext *c, int argc, const char **argv, const size_t *argvlen);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

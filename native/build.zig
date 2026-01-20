@@ -39,7 +39,7 @@ pub fn build(b: *std.Build) void {
 
     shared_lib.addIncludePath(upstream_path);
 
-    // Platform-specific libraries
+    // Platform-specific libraries and linker flags
     const platform_libs: []const []const u8 = switch (target.result.os.tag) {
         .windows => &.{ "ws2_32", "crypt32" },
         .freebsd => &.{"m"},
@@ -48,6 +48,11 @@ pub fn build(b: *std.Build) void {
     };
     for (platform_libs) |libname| {
         shared_lib.linkSystemLibrary(libname);
+    }
+
+    // macOS: Add headerpad for install_name_tool compatibility (required by Dart)
+    if (target.result.os.tag == .macos) {
+        shared_lib.headerpad_max_install_names = true;
     }
 
     // Install headers for ffigen
