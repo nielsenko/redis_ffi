@@ -413,7 +413,11 @@ class RedisClient {
     }
   }
 
+  // ============ String Commands ============
+
   /// Gets the value of a key.
+  ///
+  /// Returns `null` if the key does not exist.
   Future<String?> get(String key) async {
     final reply = await command(['GET', key]);
     try {
@@ -424,10 +428,304 @@ class RedisClient {
   }
 
   /// Sets a key to a value.
-  Future<void> set(String key, String value) async {
-    final reply = await command(['SET', key, value]);
+  ///
+  /// Options:
+  /// - [ex]: Set expiry in seconds
+  /// - [px]: Set expiry in milliseconds
+  /// - [exat]: Set expiry at Unix timestamp in seconds
+  /// - [pxat]: Set expiry at Unix timestamp in milliseconds
+  /// - [nx]: Only set if key does not exist
+  /// - [xx]: Only set if key already exists
+  /// - [keepTtl]: Retain the existing TTL
+  /// - [get]: Return the old value stored at key
+  ///
+  /// Returns the old value if [get] is true, otherwise returns `null`.
+  Future<String?> set(
+    String key,
+    String value, {
+    int? ex,
+    int? px,
+    int? exat,
+    int? pxat,
+    bool nx = false,
+    bool xx = false,
+    bool keepTtl = false,
+    bool get = false,
+  }) async {
+    final args = ['SET', key, value];
+    if (ex != null) args.addAll(['EX', ex.toString()]);
+    if (px != null) args.addAll(['PX', px.toString()]);
+    if (exat != null) args.addAll(['EXAT', exat.toString()]);
+    if (pxat != null) args.addAll(['PXAT', pxat.toString()]);
+    if (nx) args.add('NX');
+    if (xx) args.add('XX');
+    if (keepTtl) args.add('KEEPTTL');
+    if (get) args.add('GET');
+
+    final reply = await command(args);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets the values of multiple keys.
+  ///
+  /// Returns a list of values in the same order as the keys.
+  /// Non-existent keys return `null`.
+  Future<List<String?>> mget(List<String> keys) async {
+    final reply = await command(['MGET', ...keys]);
+    try {
+      if (reply == null) return List.filled(keys.length, null);
+      final results = <String?>[];
+      for (var i = 0; i < reply.length; i++) {
+        results.add(reply[i]?.string);
+      }
+      return results;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Sets multiple keys to their respective values.
+  Future<void> mset(Map<String, String> keyValues) async {
+    final args = ['MSET'];
+    keyValues.forEach((key, value) {
+      args.addAll([key, value]);
+    });
+    final reply = await command(args);
     reply?.free();
   }
+
+  /// Sets multiple keys only if none of them exist.
+  ///
+  /// Returns `true` if all keys were set, `false` if no keys were set
+  /// (because at least one key already existed).
+  Future<bool> msetnx(Map<String, String> keyValues) async {
+    final args = ['MSETNX'];
+    keyValues.forEach((key, value) {
+      args.addAll([key, value]);
+    });
+    final reply = await command(args);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Increments the integer value of a key by one.
+  ///
+  /// Returns the new value after incrementing.
+  Future<int> incr(String key) async {
+    final reply = await command(['INCR', key]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Increments the integer value of a key by the given amount.
+  ///
+  /// Returns the new value after incrementing.
+  Future<int> incrby(String key, int increment) async {
+    final reply = await command(['INCRBY', key, increment.toString()]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Increments the floating point value of a key by the given amount.
+  ///
+  /// Returns the new value after incrementing.
+  Future<double> incrbyfloat(String key, double increment) async {
+    final reply = await command(['INCRBYFLOAT', key, increment.toString()]);
+    try {
+      final str = reply?.string;
+      return str != null ? double.parse(str) : 0.0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Decrements the integer value of a key by one.
+  ///
+  /// Returns the new value after decrementing.
+  Future<int> decr(String key) async {
+    final reply = await command(['DECR', key]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Decrements the integer value of a key by the given amount.
+  ///
+  /// Returns the new value after decrementing.
+  Future<int> decrby(String key, int decrement) async {
+    final reply = await command(['DECRBY', key, decrement.toString()]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Appends a value to a key.
+  ///
+  /// Returns the length of the string after the append.
+  Future<int> append(String key, String value) async {
+    final reply = await command(['APPEND', key, value]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the length of the string stored at key.
+  Future<int> strlen(String key) async {
+    final reply = await command(['STRLEN', key]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Sets or clears the bit at offset in the string value stored at key.
+  ///
+  /// Returns the original bit value at the offset.
+  Future<int> setbit(String key, int offset, int value) async {
+    final reply = await command([
+      'SETBIT',
+      key,
+      offset.toString(),
+      value.toString(),
+    ]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns the bit value at offset in the string value stored at key.
+  Future<int> getbit(String key, int offset) async {
+    final reply = await command(['GETBIT', key, offset.toString()]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Overwrites part of the string stored at key starting at the specified offset.
+  ///
+  /// Returns the length of the string after it was modified.
+  Future<int> setrange(String key, int offset, String value) async {
+    final reply = await command(['SETRANGE', key, offset.toString(), value]);
+    try {
+      return reply?.integer ?? 0;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Returns a substring of the string stored at key.
+  Future<String?> getrange(String key, int start, int end) async {
+    final reply = await command([
+      'GETRANGE',
+      key,
+      start.toString(),
+      end.toString(),
+    ]);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Sets the value and expiration of a key in seconds.
+  Future<void> setex(String key, int seconds, String value) async {
+    final reply = await command(['SETEX', key, seconds.toString(), value]);
+    reply?.free();
+  }
+
+  /// Sets the value and expiration of a key in milliseconds.
+  Future<void> psetex(String key, int milliseconds, String value) async {
+    final reply = await command([
+      'PSETEX',
+      key,
+      milliseconds.toString(),
+      value,
+    ]);
+    reply?.free();
+  }
+
+  /// Sets the value of a key only if the key does not exist.
+  ///
+  /// Returns `true` if the key was set, `false` if it already existed.
+  Future<bool> setnx(String key, String value) async {
+    final reply = await command(['SETNX', key, value]);
+    try {
+      return (reply?.integer ?? 0) == 1;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Atomically sets a key to a value and returns the old value.
+  Future<String?> getset(String key, String value) async {
+    final reply = await command(['GETSET', key, value]);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets the value of a key and deletes it.
+  Future<String?> getdel(String key) async {
+    final reply = await command(['GETDEL', key]);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  /// Gets the value of a key and optionally sets its expiration.
+  Future<String?> getex(
+    String key, {
+    int? ex,
+    int? px,
+    int? exat,
+    int? pxat,
+    bool persist = false,
+  }) async {
+    final args = ['GETEX', key];
+    if (ex != null) args.addAll(['EX', ex.toString()]);
+    if (px != null) args.addAll(['PX', px.toString()]);
+    if (exat != null) args.addAll(['EXAT', exat.toString()]);
+    if (pxat != null) args.addAll(['PXAT', pxat.toString()]);
+    if (persist) args.add('PERSIST');
+
+    final reply = await command(args);
+    try {
+      return reply?.string;
+    } finally {
+      reply?.free();
+    }
+  }
+
+  // ============ Key Commands ============
 
   /// Deletes keys.
   Future<int> del(List<String> keys) async {
