@@ -1,0 +1,42 @@
+name: HiredisBindings
+description: FFI bindings for hiredict (hiredis fork) C library
+output: lib/src/hiredis_bindings.g.dart
+headers:
+  entry-points:
+    - native/lib/macos-x64/include/hiredict.h
+    - native/lib/macos-x64/include/async.h
+  include-directives:
+    - native/lib/macos-x64/include/hiredict.h
+    - native/lib/macos-x64/include/async.h
+    - native/lib/macos-x64/include/read.h
+    - native/lib/macos-x64/include/sds.h
+    - native/lib/macos-x64/include/alloc.h
+compiler-opts:
+  - "-Inative/lib/macos-x64/include"
+
+# Include all redict functions
+functions:
+  include:
+    - "redict.*"
+    - "freeReplyObject"
+    - "sds.*"
+
+# Include relevant structs
+structs:
+  include:
+    - "redictContext"
+    - "redictReply"
+    - "redictOptions"
+    - "redictReader"
+    - "redictAsyncContext"
+
+# Include all enums
+enums:
+  include:
+    - ".*"
+
+# Include relevant macros (constants)
+macros:
+  include:
+    - "REDICT_.*"
+    - "HIREDICT_.*"
