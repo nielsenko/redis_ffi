@@ -66,7 +66,7 @@ class RedisPubSubMessage {
     if (!_messageConverted) {
       _messageConverted = true;
       if (_messagePtr != null) {
-        _message = _messagePtr!.cast<Utf8>().toDartString(length: _messageLen);
+        _message = _messagePtr.cast<Utf8>().toDartString(length: _messageLen);
       }
     }
     return _message;
@@ -137,6 +137,7 @@ class RedisClient {
   var _nextCommandId = 0;
   var _nextPrivdata = 1;
   var _closed = false;
+  var _flushScheduled = false;
 
   RedisClient._(
     this._host,
@@ -357,8 +358,24 @@ class RedisClient {
     }
   }
 
+  /// Schedules a flush at the end of the current microtask.
+  ///
+  /// This enables automatic pipelining - multiple commands issued in the same
+  /// event loop iteration are batched together and sent in a single write.
+  void _scheduleFlush() {
+    if (!_flushScheduled) {
+      _flushScheduled = true;
+      scheduleMicrotask(() {
+        _flushScheduled = false;
+        if (!_closed) {
+          _bindings.redis_async_flush(_ctx);
+        }
+      });
+    }
+  }
+
   /// Sends a raw command and returns the reply.
-  Future<RedisReply?> command(List<String> args) async {
+  Future<RedisReply?> _command(List<String> args) async {
     _checkNotClosed();
 
     final commandId = _nextCommandId++;
@@ -388,8 +405,8 @@ class RedisClient {
         argvlen,
       );
 
-      // Flush to send the command immediately
-      _bindings.redis_async_flush(_ctx);
+      // Schedule flush at end of microtask for automatic pipelining
+      _scheduleFlush();
     } finally {
       for (var i = 0; i < argc; i++) {
         if (argv[i] != nullptr) {
@@ -405,7 +422,9 @@ class RedisClient {
 
   /// Pings the server.
   Future<String> ping([String? message]) async {
-    final reply = await command(message != null ? ['PING', message] : ['PING']);
+    final reply = await _command(
+      message != null ? ['PING', message] : ['PING'],
+    );
     try {
       return reply?.string ?? 'PONG';
     } finally {
@@ -419,7 +438,7 @@ class RedisClient {
   ///
   /// Returns `null` if the key does not exist.
   Future<String?> get(String key) async {
-    final reply = await command(['GET', key]);
+    final reply = await _command(['GET', key]);
     try {
       return reply?.string;
     } finally {
@@ -462,7 +481,7 @@ class RedisClient {
     if (keepTtl) args.add('KEEPTTL');
     if (get) args.add('GET');
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       return reply?.string;
     } finally {
@@ -475,7 +494,7 @@ class RedisClient {
   /// Returns a list of values in the same order as the keys.
   /// Non-existent keys return `null`.
   Future<List<String?>> mget(List<String> keys) async {
-    final reply = await command(['MGET', ...keys]);
+    final reply = await _command(['MGET', ...keys]);
     try {
       if (reply == null) return List.filled(keys.length, null);
       final results = <String?>[];
@@ -494,7 +513,7 @@ class RedisClient {
     keyValues.forEach((key, value) {
       args.addAll([key, value]);
     });
-    final reply = await command(args);
+    final reply = await _command(args);
     reply?.free();
   }
 
@@ -507,7 +526,7 @@ class RedisClient {
     keyValues.forEach((key, value) {
       args.addAll([key, value]);
     });
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -519,7 +538,7 @@ class RedisClient {
   ///
   /// Returns the new value after incrementing.
   Future<int> incr(String key) async {
-    final reply = await command(['INCR', key]);
+    final reply = await _command(['INCR', key]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -531,7 +550,7 @@ class RedisClient {
   ///
   /// Returns the new value after incrementing.
   Future<int> incrby(String key, int increment) async {
-    final reply = await command(['INCRBY', key, increment.toString()]);
+    final reply = await _command(['INCRBY', key, increment.toString()]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -543,7 +562,7 @@ class RedisClient {
   ///
   /// Returns the new value after incrementing.
   Future<double> incrbyfloat(String key, double increment) async {
-    final reply = await command(['INCRBYFLOAT', key, increment.toString()]);
+    final reply = await _command(['INCRBYFLOAT', key, increment.toString()]);
     try {
       final str = reply?.string;
       return str != null ? double.parse(str) : 0.0;
@@ -556,7 +575,7 @@ class RedisClient {
   ///
   /// Returns the new value after decrementing.
   Future<int> decr(String key) async {
-    final reply = await command(['DECR', key]);
+    final reply = await _command(['DECR', key]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -568,7 +587,7 @@ class RedisClient {
   ///
   /// Returns the new value after decrementing.
   Future<int> decrby(String key, int decrement) async {
-    final reply = await command(['DECRBY', key, decrement.toString()]);
+    final reply = await _command(['DECRBY', key, decrement.toString()]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -580,7 +599,7 @@ class RedisClient {
   ///
   /// Returns the length of the string after the append.
   Future<int> append(String key, String value) async {
-    final reply = await command(['APPEND', key, value]);
+    final reply = await _command(['APPEND', key, value]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -590,7 +609,7 @@ class RedisClient {
 
   /// Returns the length of the string stored at key.
   Future<int> strlen(String key) async {
-    final reply = await command(['STRLEN', key]);
+    final reply = await _command(['STRLEN', key]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -602,7 +621,7 @@ class RedisClient {
   ///
   /// Returns the original bit value at the offset.
   Future<int> setbit(String key, int offset, int value) async {
-    final reply = await command([
+    final reply = await _command([
       'SETBIT',
       key,
       offset.toString(),
@@ -617,7 +636,7 @@ class RedisClient {
 
   /// Returns the bit value at offset in the string value stored at key.
   Future<int> getbit(String key, int offset) async {
-    final reply = await command(['GETBIT', key, offset.toString()]);
+    final reply = await _command(['GETBIT', key, offset.toString()]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -629,7 +648,7 @@ class RedisClient {
   ///
   /// Returns the length of the string after it was modified.
   Future<int> setrange(String key, int offset, String value) async {
-    final reply = await command(['SETRANGE', key, offset.toString(), value]);
+    final reply = await _command(['SETRANGE', key, offset.toString(), value]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -639,7 +658,7 @@ class RedisClient {
 
   /// Returns a substring of the string stored at key.
   Future<String?> getrange(String key, int start, int end) async {
-    final reply = await command([
+    final reply = await _command([
       'GETRANGE',
       key,
       start.toString(),
@@ -654,13 +673,13 @@ class RedisClient {
 
   /// Sets the value and expiration of a key in seconds.
   Future<void> setex(String key, int seconds, String value) async {
-    final reply = await command(['SETEX', key, seconds.toString(), value]);
+    final reply = await _command(['SETEX', key, seconds.toString(), value]);
     reply?.free();
   }
 
   /// Sets the value and expiration of a key in milliseconds.
   Future<void> psetex(String key, int milliseconds, String value) async {
-    final reply = await command([
+    final reply = await _command([
       'PSETEX',
       key,
       milliseconds.toString(),
@@ -673,7 +692,7 @@ class RedisClient {
   ///
   /// Returns `true` if the key was set, `false` if it already existed.
   Future<bool> setnx(String key, String value) async {
-    final reply = await command(['SETNX', key, value]);
+    final reply = await _command(['SETNX', key, value]);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -683,7 +702,7 @@ class RedisClient {
 
   /// Atomically sets a key to a value and returns the old value.
   Future<String?> getset(String key, String value) async {
-    final reply = await command(['GETSET', key, value]);
+    final reply = await _command(['GETSET', key, value]);
     try {
       return reply?.string;
     } finally {
@@ -693,7 +712,7 @@ class RedisClient {
 
   /// Gets the value of a key and deletes it.
   Future<String?> getdel(String key) async {
-    final reply = await command(['GETDEL', key]);
+    final reply = await _command(['GETDEL', key]);
     try {
       return reply?.string;
     } finally {
@@ -717,7 +736,7 @@ class RedisClient {
     if (pxat != null) args.addAll(['PXAT', pxat.toString()]);
     if (persist) args.add('PERSIST');
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       return reply?.string;
     } finally {
@@ -731,7 +750,7 @@ class RedisClient {
   ///
   /// Returns the number of keys that were deleted.
   Future<int> del(List<String> keys) async {
-    final reply = await command(['DEL', ...keys]);
+    final reply = await _command(['DEL', ...keys]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -743,7 +762,7 @@ class RedisClient {
   ///
   /// Returns the number of keys that were scheduled for deletion.
   Future<int> unlink(List<String> keys) async {
-    final reply = await command(['UNLINK', ...keys]);
+    final reply = await _command(['UNLINK', ...keys]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -755,7 +774,7 @@ class RedisClient {
   ///
   /// Returns the number of keys that exist.
   Future<int> existsCount(List<String> keys) async {
-    final reply = await command(['EXISTS', ...keys]);
+    final reply = await _command(['EXISTS', ...keys]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -772,7 +791,7 @@ class RedisClient {
   ///
   /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
   Future<bool> expire(String key, int seconds) async {
-    final reply = await command(['EXPIRE', key, seconds.toString()]);
+    final reply = await _command(['EXPIRE', key, seconds.toString()]);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -784,7 +803,7 @@ class RedisClient {
   ///
   /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
   Future<bool> pexpire(String key, int milliseconds) async {
-    final reply = await command(['PEXPIRE', key, milliseconds.toString()]);
+    final reply = await _command(['PEXPIRE', key, milliseconds.toString()]);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -796,7 +815,7 @@ class RedisClient {
   ///
   /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
   Future<bool> expireat(String key, int timestamp) async {
-    final reply = await command(['EXPIREAT', key, timestamp.toString()]);
+    final reply = await _command(['EXPIREAT', key, timestamp.toString()]);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -808,7 +827,7 @@ class RedisClient {
   ///
   /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
   Future<bool> pexpireat(String key, int timestamp) async {
-    final reply = await command(['PEXPIREAT', key, timestamp.toString()]);
+    final reply = await _command(['PEXPIREAT', key, timestamp.toString()]);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -820,7 +839,7 @@ class RedisClient {
   ///
   /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
   Future<int> ttl(String key) async {
-    final reply = await command(['TTL', key]);
+    final reply = await _command(['TTL', key]);
     try {
       return reply?.integer ?? -2;
     } finally {
@@ -832,7 +851,7 @@ class RedisClient {
   ///
   /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
   Future<int> pttl(String key) async {
-    final reply = await command(['PTTL', key]);
+    final reply = await _command(['PTTL', key]);
     try {
       return reply?.integer ?? -2;
     } finally {
@@ -845,7 +864,7 @@ class RedisClient {
   /// Returns `true` if the timeout was removed, `false` if the key doesn't
   /// exist or has no associated timeout.
   Future<bool> persist(String key) async {
-    final reply = await command(['PERSIST', key]);
+    final reply = await _command(['PERSIST', key]);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -857,7 +876,7 @@ class RedisClient {
   ///
   /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
   Future<int> expiretime(String key) async {
-    final reply = await command(['EXPIRETIME', key]);
+    final reply = await _command(['EXPIRETIME', key]);
     try {
       return reply?.integer ?? -2;
     } finally {
@@ -869,7 +888,7 @@ class RedisClient {
   ///
   /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
   Future<int> pexpiretime(String key) async {
-    final reply = await command(['PEXPIRETIME', key]);
+    final reply = await _command(['PEXPIRETIME', key]);
     try {
       return reply?.integer ?? -2;
     } finally {
@@ -881,7 +900,7 @@ class RedisClient {
   ///
   /// Returns "none" if the key doesn't exist.
   Future<String> type(String key) async {
-    final reply = await command(['TYPE', key]);
+    final reply = await _command(['TYPE', key]);
     try {
       return reply?.string ?? 'none';
     } finally {
@@ -893,7 +912,7 @@ class RedisClient {
   ///
   /// Throws if the key doesn't exist.
   Future<void> rename(String key, String newKey) async {
-    final reply = await command(['RENAME', key, newKey]);
+    final reply = await _command(['RENAME', key, newKey]);
     reply?.free();
   }
 
@@ -901,7 +920,7 @@ class RedisClient {
   ///
   /// Returns `true` if the key was renamed, `false` if the new key already exists.
   Future<bool> renamenx(String key, String newKey) async {
-    final reply = await command(['RENAMENX', key, newKey]);
+    final reply = await _command(['RENAMENX', key, newKey]);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -914,7 +933,7 @@ class RedisClient {
   /// Warning: KEYS should not be used in production as it may block the server.
   /// Use [scan] instead for production workloads.
   Future<List<String>> keys(String pattern) async {
-    final reply = await command(['KEYS', pattern]);
+    final reply = await _command(['KEYS', pattern]);
     try {
       if (reply == null) return [];
       final results = <String>[];
@@ -942,7 +961,7 @@ class RedisClient {
     if (count != null) args.addAll(['COUNT', count.toString()]);
     if (type != null) args.addAll(['TYPE', type]);
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       if (reply == null || reply.length < 2) return ('0', <String>[]);
 
@@ -963,7 +982,7 @@ class RedisClient {
 
   /// Returns a random key from the database.
   Future<String?> randomkey() async {
-    final reply = await command(['RANDOMKEY']);
+    final reply = await _command(['RANDOMKEY']);
     try {
       return reply?.string;
     } finally {
@@ -975,7 +994,7 @@ class RedisClient {
   ///
   /// Returns the number of keys that were touched.
   Future<int> touch(List<String> keys) async {
-    final reply = await command(['TOUCH', ...keys]);
+    final reply = await _command(['TOUCH', ...keys]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -988,7 +1007,7 @@ class RedisClient {
     final args = ['MEMORY', 'USAGE', key];
     if (samples != null) args.addAll(['SAMPLES', samples.toString()]);
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       return reply?.integer;
     } finally {
@@ -1009,7 +1028,7 @@ class RedisClient {
     if (db != null) args.addAll(['DB', db.toString()]);
     if (replace) args.add('REPLACE');
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -1019,7 +1038,7 @@ class RedisClient {
 
   /// Returns the time since the object stored at key is idle.
   Future<int?> objectIdletime(String key) async {
-    final reply = await command(['OBJECT', 'IDLETIME', key]);
+    final reply = await _command(['OBJECT', 'IDLETIME', key]);
     try {
       return reply?.integer;
     } finally {
@@ -1029,7 +1048,7 @@ class RedisClient {
 
   /// Returns the access frequency of the object stored at key.
   Future<int?> objectFreq(String key) async {
-    final reply = await command(['OBJECT', 'FREQ', key]);
+    final reply = await _command(['OBJECT', 'FREQ', key]);
     try {
       return reply?.integer;
     } finally {
@@ -1039,7 +1058,7 @@ class RedisClient {
 
   /// Returns the encoding of the object stored at key.
   Future<String?> objectEncoding(String key) async {
-    final reply = await command(['OBJECT', 'ENCODING', key]);
+    final reply = await _command(['OBJECT', 'ENCODING', key]);
     try {
       return reply?.string;
     } finally {
@@ -1054,7 +1073,7 @@ class RedisClient {
   /// Returns the number of fields that were added (0 if the field already
   /// existed and was updated).
   Future<int> hset(String key, String field, String value) async {
-    final reply = await command(['HSET', key, field, value]);
+    final reply = await _command(['HSET', key, field, value]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1071,7 +1090,7 @@ class RedisClient {
       args.addAll([entry.key, entry.value]);
     }
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1081,7 +1100,7 @@ class RedisClient {
 
   /// Gets the value of a field in a hash.
   Future<String?> hget(String key, String field) async {
-    final reply = await command(['HGET', key, field]);
+    final reply = await _command(['HGET', key, field]);
     try {
       return reply?.string;
     } finally {
@@ -1091,7 +1110,7 @@ class RedisClient {
 
   /// Gets all fields and values in a hash.
   Future<Map<String, String>> hgetall(String key) async {
-    final reply = await command(['HGETALL', key]);
+    final reply = await _command(['HGETALL', key]);
     try {
       final result = <String, String>{};
       if (reply == null) return result;
@@ -1111,7 +1130,7 @@ class RedisClient {
 
   /// Gets the values of multiple fields in a hash.
   Future<List<String?>> hmget(String key, List<String> fields) async {
-    final reply = await command(['HMGET', key, ...fields]);
+    final reply = await _command(['HMGET', key, ...fields]);
     try {
       final result = <String?>[];
       if (reply == null) return result;
@@ -1129,7 +1148,7 @@ class RedisClient {
   ///
   /// Returns the number of fields that were removed.
   Future<int> hdel(String key, List<String> fields) async {
-    final reply = await command(['HDEL', key, ...fields]);
+    final reply = await _command(['HDEL', key, ...fields]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1139,7 +1158,7 @@ class RedisClient {
 
   /// Checks if a field exists in a hash.
   Future<bool> hexists(String key, String field) async {
-    final reply = await command(['HEXISTS', key, field]);
+    final reply = await _command(['HEXISTS', key, field]);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -1149,7 +1168,7 @@ class RedisClient {
 
   /// Gets all field names in a hash.
   Future<List<String>> hkeys(String key) async {
-    final reply = await command(['HKEYS', key]);
+    final reply = await _command(['HKEYS', key]);
     try {
       final result = <String>[];
       if (reply == null) return result;
@@ -1166,7 +1185,7 @@ class RedisClient {
 
   /// Gets all values in a hash.
   Future<List<String>> hvals(String key) async {
-    final reply = await command(['HVALS', key]);
+    final reply = await _command(['HVALS', key]);
     try {
       final result = <String>[];
       if (reply == null) return result;
@@ -1183,7 +1202,7 @@ class RedisClient {
 
   /// Gets the number of fields in a hash.
   Future<int> hlen(String key) async {
-    final reply = await command(['HLEN', key]);
+    final reply = await _command(['HLEN', key]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1195,7 +1214,7 @@ class RedisClient {
   ///
   /// Returns the value after the increment.
   Future<int> hincrby(String key, String field, int increment) async {
-    final reply = await command(['HINCRBY', key, field, increment.toString()]);
+    final reply = await _command(['HINCRBY', key, field, increment.toString()]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1211,7 +1230,7 @@ class RedisClient {
     String field,
     double increment,
   ) async {
-    final reply = await command([
+    final reply = await _command([
       'HINCRBYFLOAT',
       key,
       field,
@@ -1229,7 +1248,7 @@ class RedisClient {
   ///
   /// Returns `true` if the field was set, `false` if it already existed.
   Future<bool> hsetnx(String key, String field, String value) async {
-    final reply = await command(['HSETNX', key, field, value]);
+    final reply = await _command(['HSETNX', key, field, value]);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -1239,7 +1258,7 @@ class RedisClient {
 
   /// Gets the string length of a field value in a hash.
   Future<int> hstrlen(String key, String field) async {
-    final reply = await command(['HSTRLEN', key, field]);
+    final reply = await _command(['HSTRLEN', key, field]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1262,7 +1281,7 @@ class RedisClient {
       if (withValues) args.add('WITHVALUES');
     }
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       final result = <String>[];
       if (reply == null) return result;
@@ -1296,7 +1315,7 @@ class RedisClient {
     if (match != null) args.addAll(['MATCH', match]);
     if (count != null) args.addAll(['COUNT', count.toString()]);
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       if (reply == null || reply.length < 2) {
         return ('0', <String, String>{});
@@ -1326,7 +1345,7 @@ class RedisClient {
   ///
   /// Returns the length of the list after the push.
   Future<int> lpush(String key, List<String> values) async {
-    final reply = await command(['LPUSH', key, ...values]);
+    final reply = await _command(['LPUSH', key, ...values]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1338,7 +1357,7 @@ class RedisClient {
   ///
   /// Returns the length of the list after the push.
   Future<int> rpush(String key, List<String> values) async {
-    final reply = await command(['RPUSH', key, ...values]);
+    final reply = await _command(['RPUSH', key, ...values]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1351,7 +1370,7 @@ class RedisClient {
   /// Returns the length of the list after the push, or 0 if the list doesn't
   /// exist.
   Future<int> lpushx(String key, List<String> values) async {
-    final reply = await command(['LPUSHX', key, ...values]);
+    final reply = await _command(['LPUSHX', key, ...values]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1364,7 +1383,7 @@ class RedisClient {
   /// Returns the length of the list after the push, or 0 if the list doesn't
   /// exist.
   Future<int> rpushx(String key, List<String> values) async {
-    final reply = await command(['RPUSHX', key, ...values]);
+    final reply = await _command(['RPUSHX', key, ...values]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1374,7 +1393,7 @@ class RedisClient {
 
   /// Removes and returns the first element of a list.
   Future<String?> lpop(String key) async {
-    final reply = await command(['LPOP', key]);
+    final reply = await _command(['LPOP', key]);
     try {
       return reply?.string;
     } finally {
@@ -1384,7 +1403,7 @@ class RedisClient {
 
   /// Removes and returns the last element of a list.
   Future<String?> rpop(String key) async {
-    final reply = await command(['RPOP', key]);
+    final reply = await _command(['RPOP', key]);
     try {
       return reply?.string;
     } finally {
@@ -1394,7 +1413,7 @@ class RedisClient {
 
   /// Removes and returns multiple elements from the left of a list.
   Future<List<String>> lpopCount(String key, int count) async {
-    final reply = await command(['LPOP', key, count.toString()]);
+    final reply = await _command(['LPOP', key, count.toString()]);
     try {
       final result = <String>[];
       if (reply == null) return result;
@@ -1416,7 +1435,7 @@ class RedisClient {
 
   /// Removes and returns multiple elements from the right of a list.
   Future<List<String>> rpopCount(String key, int count) async {
-    final reply = await command(['RPOP', key, count.toString()]);
+    final reply = await _command(['RPOP', key, count.toString()]);
     try {
       final result = <String>[];
       if (reply == null) return result;
@@ -1440,7 +1459,7 @@ class RedisClient {
   /// [start] and [stop] are zero-based indices. Negative indices count from
   /// the end (-1 is the last element).
   Future<List<String>> lrange(String key, int start, int stop) async {
-    final reply = await command([
+    final reply = await _command([
       'LRANGE',
       key,
       start.toString(),
@@ -1464,7 +1483,7 @@ class RedisClient {
   ///
   /// Negative indices count from the end (-1 is the last element).
   Future<String?> lindex(String key, int index) async {
-    final reply = await command(['LINDEX', key, index.toString()]);
+    final reply = await _command(['LINDEX', key, index.toString()]);
     try {
       return reply?.string;
     } finally {
@@ -1474,7 +1493,7 @@ class RedisClient {
 
   /// Sets the element at [index] in the list.
   Future<void> lset(String key, int index, String value) async {
-    final reply = await command(['LSET', key, index.toString(), value]);
+    final reply = await _command(['LSET', key, index.toString(), value]);
     try {
       // LSET returns OK on success
     } finally {
@@ -1484,7 +1503,7 @@ class RedisClient {
 
   /// Returns the length of a list.
   Future<int> llen(String key) async {
-    final reply = await command(['LLEN', key]);
+    final reply = await _command(['LLEN', key]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1503,7 +1522,7 @@ class RedisClient {
     required bool before,
   }) async {
     final position = before ? 'BEFORE' : 'AFTER';
-    final reply = await command(['LINSERT', key, position, pivot, value]);
+    final reply = await _command(['LINSERT', key, position, pivot, value]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1519,7 +1538,7 @@ class RedisClient {
   ///
   /// Returns the number of removed elements.
   Future<int> lrem(String key, int count, String value) async {
-    final reply = await command(['LREM', key, count.toString(), value]);
+    final reply = await _command(['LREM', key, count.toString(), value]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1529,7 +1548,7 @@ class RedisClient {
 
   /// Trims a list to the specified range.
   Future<void> ltrim(String key, int start, int stop) async {
-    final reply = await command([
+    final reply = await _command([
       'LTRIM',
       key,
       start.toString(),
@@ -1551,7 +1570,7 @@ class RedisClient {
     required String srcDirection,
     required String dstDirection,
   }) async {
-    final reply = await command([
+    final reply = await _command([
       'LMOVE',
       source,
       destination,
@@ -1569,7 +1588,7 @@ class RedisClient {
   ///
   /// Returns null if the element is not found.
   Future<int?> lpos(String key, String element) async {
-    final reply = await command(['LPOS', key, element]);
+    final reply = await _command(['LPOS', key, element]);
     try {
       if (reply == null || reply.isNil) return null;
       return reply.integer;
@@ -1584,7 +1603,7 @@ class RedisClient {
   ///
   /// Returns the number of members that were added (not already present).
   Future<int> sadd(String key, List<String> members) async {
-    final reply = await command(['SADD', key, ...members]);
+    final reply = await _command(['SADD', key, ...members]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1596,7 +1615,7 @@ class RedisClient {
   ///
   /// Returns the number of members that were removed.
   Future<int> srem(String key, List<String> members) async {
-    final reply = await command(['SREM', key, ...members]);
+    final reply = await _command(['SREM', key, ...members]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1606,7 +1625,7 @@ class RedisClient {
 
   /// Returns all members of a set.
   Future<Set<String>> smembers(String key) async {
-    final reply = await command(['SMEMBERS', key]);
+    final reply = await _command(['SMEMBERS', key]);
     try {
       final result = <String>{};
       if (reply == null) return result;
@@ -1623,7 +1642,7 @@ class RedisClient {
 
   /// Checks if a member is in a set.
   Future<bool> sismember(String key, String member) async {
-    final reply = await command(['SISMEMBER', key, member]);
+    final reply = await _command(['SISMEMBER', key, member]);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -1635,7 +1654,7 @@ class RedisClient {
   ///
   /// Returns a list of booleans indicating membership for each member.
   Future<List<bool>> smismember(String key, List<String> members) async {
-    final reply = await command(['SMISMEMBER', key, ...members]);
+    final reply = await _command(['SMISMEMBER', key, ...members]);
     try {
       final result = <bool>[];
       if (reply == null) return result;
@@ -1651,7 +1670,7 @@ class RedisClient {
 
   /// Returns the number of members in a set.
   Future<int> scard(String key) async {
-    final reply = await command(['SCARD', key]);
+    final reply = await _command(['SCARD', key]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1661,7 +1680,7 @@ class RedisClient {
 
   /// Removes and returns a random member from a set.
   Future<String?> spop(String key) async {
-    final reply = await command(['SPOP', key]);
+    final reply = await _command(['SPOP', key]);
     try {
       return reply?.string;
     } finally {
@@ -1671,7 +1690,7 @@ class RedisClient {
 
   /// Removes and returns multiple random members from a set.
   Future<Set<String>> spopCount(String key, int count) async {
-    final reply = await command(['SPOP', key, count.toString()]);
+    final reply = await _command(['SPOP', key, count.toString()]);
     try {
       final result = <String>{};
       if (reply == null) return result;
@@ -1688,7 +1707,7 @@ class RedisClient {
 
   /// Returns a random member from a set without removing it.
   Future<String?> srandmember(String key) async {
-    final reply = await command(['SRANDMEMBER', key]);
+    final reply = await _command(['SRANDMEMBER', key]);
     try {
       return reply?.string;
     } finally {
@@ -1698,7 +1717,7 @@ class RedisClient {
 
   /// Returns multiple random members from a set without removing them.
   Future<List<String>> srandmemberCount(String key, int count) async {
-    final reply = await command(['SRANDMEMBER', key, count.toString()]);
+    final reply = await _command(['SRANDMEMBER', key, count.toString()]);
     try {
       final result = <String>[];
       if (reply == null) return result;
@@ -1718,7 +1737,7 @@ class RedisClient {
   /// Returns `true` if the member was moved, `false` if it wasn't in the source
   /// set.
   Future<bool> smove(String source, String destination, String member) async {
-    final reply = await command(['SMOVE', source, destination, member]);
+    final reply = await _command(['SMOVE', source, destination, member]);
     try {
       return (reply?.integer ?? 0) == 1;
     } finally {
@@ -1728,7 +1747,7 @@ class RedisClient {
 
   /// Returns the difference between the first set and all subsequent sets.
   Future<Set<String>> sdiff(List<String> keys) async {
-    final reply = await command(['SDIFF', ...keys]);
+    final reply = await _command(['SDIFF', ...keys]);
     try {
       final result = <String>{};
       if (reply == null) return result;
@@ -1747,7 +1766,7 @@ class RedisClient {
   ///
   /// Returns the number of members in the resulting set.
   Future<int> sdiffstore(String destination, List<String> keys) async {
-    final reply = await command(['SDIFFSTORE', destination, ...keys]);
+    final reply = await _command(['SDIFFSTORE', destination, ...keys]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1757,7 +1776,7 @@ class RedisClient {
 
   /// Returns the intersection of all given sets.
   Future<Set<String>> sinter(List<String> keys) async {
-    final reply = await command(['SINTER', ...keys]);
+    final reply = await _command(['SINTER', ...keys]);
     try {
       final result = <String>{};
       if (reply == null) return result;
@@ -1776,7 +1795,7 @@ class RedisClient {
   ///
   /// Returns the number of members in the resulting set.
   Future<int> sinterstore(String destination, List<String> keys) async {
-    final reply = await command(['SINTERSTORE', destination, ...keys]);
+    final reply = await _command(['SINTERSTORE', destination, ...keys]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1789,7 +1808,7 @@ class RedisClient {
     final args = ['SINTERCARD', keys.length.toString(), ...keys];
     if (limit != null) args.addAll(['LIMIT', limit.toString()]);
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1799,7 +1818,7 @@ class RedisClient {
 
   /// Returns the union of all given sets.
   Future<Set<String>> sunion(List<String> keys) async {
-    final reply = await command(['SUNION', ...keys]);
+    final reply = await _command(['SUNION', ...keys]);
     try {
       final result = <String>{};
       if (reply == null) return result;
@@ -1818,7 +1837,7 @@ class RedisClient {
   ///
   /// Returns the number of members in the resulting set.
   Future<int> sunionstore(String destination, List<String> keys) async {
-    final reply = await command(['SUNIONSTORE', destination, ...keys]);
+    final reply = await _command(['SUNIONSTORE', destination, ...keys]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1840,7 +1859,7 @@ class RedisClient {
     if (match != null) args.addAll(['MATCH', match]);
     if (count != null) args.addAll(['COUNT', count.toString()]);
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       if (reply == null || reply.length < 2) {
         return ('0', <String>{});
@@ -1897,7 +1916,7 @@ class RedisClient {
       args.addAll([entry.value.toString(), entry.key]);
     }
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1909,7 +1928,7 @@ class RedisClient {
   ///
   /// Returns the number of members removed.
   Future<int> zrem(String key, List<String> members) async {
-    final reply = await command(['ZREM', key, ...members]);
+    final reply = await _command(['ZREM', key, ...members]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1919,7 +1938,7 @@ class RedisClient {
 
   /// Returns the score of a member in a sorted set.
   Future<double?> zscore(String key, String member) async {
-    final reply = await command(['ZSCORE', key, member]);
+    final reply = await _command(['ZSCORE', key, member]);
     try {
       if (reply == null || reply.isNil) return null;
       final str = reply.string;
@@ -1931,7 +1950,7 @@ class RedisClient {
 
   /// Returns the scores of multiple members in a sorted set.
   Future<List<double?>> zmscore(String key, List<String> members) async {
-    final reply = await command(['ZMSCORE', key, ...members]);
+    final reply = await _command(['ZMSCORE', key, ...members]);
     try {
       final result = <double?>[];
       if (reply == null) return result;
@@ -1955,7 +1974,7 @@ class RedisClient {
   ///
   /// Members are ordered from lowest to highest score.
   Future<int?> zrank(String key, String member) async {
-    final reply = await command(['ZRANK', key, member]);
+    final reply = await _command(['ZRANK', key, member]);
     try {
       if (reply == null || reply.isNil) return null;
       return reply.integer;
@@ -1968,7 +1987,7 @@ class RedisClient {
   ///
   /// Members are ordered from highest to lowest score.
   Future<int?> zrevrank(String key, String member) async {
-    final reply = await command(['ZREVRANK', key, member]);
+    final reply = await _command(['ZREVRANK', key, member]);
     try {
       if (reply == null || reply.isNil) return null;
       return reply.integer;
@@ -1979,7 +1998,7 @@ class RedisClient {
 
   /// Returns the number of members in a sorted set.
   Future<int> zcard(String key) async {
-    final reply = await command(['ZCARD', key]);
+    final reply = await _command(['ZCARD', key]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -1990,7 +2009,7 @@ class RedisClient {
   /// Returns the number of members in a sorted set with scores within the
   /// given range.
   Future<int> zcount(String key, String min, String max) async {
-    final reply = await command(['ZCOUNT', key, min, max]);
+    final reply = await _command(['ZCOUNT', key, min, max]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -2010,7 +2029,7 @@ class RedisClient {
     final args = ['ZRANGE', key, start.toString(), stop.toString()];
     if (withScores) args.add('WITHSCORES');
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       final result = <String>[];
       if (reply == null) return result;
@@ -2033,7 +2052,7 @@ class RedisClient {
     int start,
     int stop,
   ) async {
-    final reply = await command([
+    final reply = await _command([
       'ZRANGE',
       key,
       start.toString(),
@@ -2070,7 +2089,7 @@ class RedisClient {
       args.addAll(['LIMIT', offset.toString(), count.toString()]);
     }
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       final result = <String>[];
       if (reply == null) return result;
@@ -2098,7 +2117,7 @@ class RedisClient {
       args.addAll(['LIMIT', offset.toString(), count.toString()]);
     }
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       final result = <String>[];
       if (reply == null) return result;
@@ -2117,7 +2136,12 @@ class RedisClient {
   ///
   /// Returns the new score.
   Future<double> zincrby(String key, double increment, String member) async {
-    final reply = await command(['ZINCRBY', key, increment.toString(), member]);
+    final reply = await _command([
+      'ZINCRBY',
+      key,
+      increment.toString(),
+      member,
+    ]);
     try {
       final str = reply?.string;
       return str != null ? double.parse(str) : 0.0;
@@ -2130,7 +2154,7 @@ class RedisClient {
   ///
   /// Returns the number of members removed.
   Future<int> zremrangebyscore(String key, String min, String max) async {
-    final reply = await command(['ZREMRANGEBYSCORE', key, min, max]);
+    final reply = await _command(['ZREMRANGEBYSCORE', key, min, max]);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -2142,7 +2166,7 @@ class RedisClient {
   ///
   /// Returns the number of members removed.
   Future<int> zremrangebyrank(String key, int start, int stop) async {
-    final reply = await command([
+    final reply = await _command([
       'ZREMRANGEBYRANK',
       key,
       start.toString(),
@@ -2157,7 +2181,7 @@ class RedisClient {
 
   /// Removes and returns members with the lowest scores from a sorted set.
   Future<List<(String, double)>> zpopmin(String key, {int count = 1}) async {
-    final reply = await command(['ZPOPMIN', key, count.toString()]);
+    final reply = await _command(['ZPOPMIN', key, count.toString()]);
     try {
       final result = <(String, double)>[];
       if (reply == null) return result;
@@ -2177,7 +2201,7 @@ class RedisClient {
 
   /// Removes and returns members with the highest scores from a sorted set.
   Future<List<(String, double)>> zpopmax(String key, {int count = 1}) async {
-    final reply = await command(['ZPOPMAX', key, count.toString()]);
+    final reply = await _command(['ZPOPMAX', key, count.toString()]);
     try {
       final result = <(String, double)>[];
       if (reply == null) return result;
@@ -2213,7 +2237,7 @@ class RedisClient {
       args.addAll(['AGGREGATE', aggregate]);
     }
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -2239,7 +2263,7 @@ class RedisClient {
       args.addAll(['AGGREGATE', aggregate]);
     }
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       return reply?.integer ?? 0;
     } finally {
@@ -2261,7 +2285,7 @@ class RedisClient {
     if (match != null) args.addAll(['MATCH', match]);
     if (count != null) args.addAll(['COUNT', count.toString()]);
 
-    final reply = await command(args);
+    final reply = await _command(args);
     try {
       if (reply == null || reply.length < 2) {
         return ('0', <(String, double)>[]);
@@ -2283,20 +2307,6 @@ class RedisClient {
     } finally {
       reply?.free();
     }
-  }
-
-  /// Executes multiple commands in a pipeline.
-  ///
-  /// All commands are sent at once, and results are returned in order.
-  Future<List<RedisReply?>> pipeline(List<List<String>> commands) async {
-    _checkNotClosed();
-
-    final futures = <Future<RedisReply?>>[];
-    for (final cmd in commands) {
-      futures.add(command(cmd));
-    }
-
-    return Future.wait(futures);
   }
 
   // ============ Pub/Sub API ============
@@ -2343,7 +2353,7 @@ class RedisClient {
 
   /// Publishes a message to a channel.
   Future<int> publish(String channel, String message) async {
-    final reply = await command(['PUBLISH', channel, message]);
+    final reply = await _command(['PUBLISH', channel, message]);
     try {
       return reply?.integer ?? 0;
     } finally {

@@ -25,13 +25,6 @@ void main() async {
 
     // Check again
     print('EXISTS greeting: ${await client.exists('greeting')}');
-
-    // Execute raw command
-    final reply = await client.command(['INFO', 'server']);
-    print(
-      'INFO server (first 100 chars): ${reply?.string?.substring(0, 100)}...',
-    );
-    reply?.free();
   } on RedisException catch (e) {
     print('Redis error: $e');
   } finally {
