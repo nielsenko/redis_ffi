@@ -14,8 +14,15 @@
 //   dart run tool/build_all.dart linux-x64 # Build specific platform
 import 'dart:io';
 
-/// Required Zig version (must match .zig-version file).
-const zigVersion = '0.15.2';
+/// Reads the required Zig version from .zig-version file.
+String get zigVersion {
+  final scriptDir = File(Platform.script.toFilePath()).parent.parent.path;
+  final versionFile = File('$scriptDir/.zig-version');
+  if (!versionFile.existsSync()) {
+    throw Exception('.zig-version file not found');
+  }
+  return versionFile.readAsStringSync().trim();
+}
 
 /// Target configurations: platform name -> zig target triple.
 ///
