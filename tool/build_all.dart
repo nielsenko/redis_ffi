@@ -41,6 +41,8 @@ const targets = <String, String>{
   'android-x64': 'x86_64-linux-musl',
   // iOS (requires Xcode SDK on macOS)
   'ios-arm64': 'aarch64-ios',
+  'ios-simulator-arm64': 'aarch64-ios-simulator',
+  'ios-simulator-x64': 'x86_64-ios-simulator',
 };
 
 Future<void> main(List<String> args) async {
@@ -171,12 +173,9 @@ Future<void> _ensureZigVersion() async {
   print('  Using Zig $installedVersion');
 }
 
-Future<String> _getIosSysroot() async {
-  final result = await Process.run('xcrun', [
-    '--sdk',
-    'iphoneos',
-    '--show-sdk-path',
-  ]);
+Future<String> _getIosSysroot({required bool simulator}) async {
+  final sdk = simulator ? 'iphonesimulator' : 'iphoneos';
+  final result = await Process.run('xcrun', ['--sdk', sdk, '--show-sdk-path']);
   if (result.exitCode != 0) {
     throw Exception(
       'Failed to get iOS SDK path. Is Xcode installed?\n'
@@ -204,11 +203,12 @@ Future<void> _buildForTarget(String platform, String zigTarget) async {
   ];
 
   // iOS requires Xcode SDK sysroot (only available on macOS)
-  if (platform == 'ios-arm64') {
+  if (platform.startsWith('ios-')) {
     if (!Platform.isMacOS) {
       throw Exception('iOS builds require macOS with Xcode installed');
     }
-    final sysroot = await _getIosSysroot();
+    final isSimulator = platform.contains('simulator');
+    final sysroot = await _getIosSysroot(simulator: isSimulator);
     args.add('--sysroot');
     args.add(sysroot);
   }
