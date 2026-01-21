@@ -156,9 +156,15 @@ If you're contributing to this package or using it as a git dependency, you'll n
 
    Once installed, zigup will automatically download the correct Zig version when you build.
 
-3. **For iOS builds (macOS only):** Xcode with iOS SDK
+3. **For Android builds:** Android NDK
 
-4. **For regenerating FFI bindings:** LLVM/libclang (for ffigen)
+   Install via Android Studio (SDK Manager → SDK Tools → NDK) or set `ANDROID_NDK_HOME`.
+
+   Android requires NDK because Zig's musl libc has different runtime symbols than Android's Bionic libc.
+
+4. **For iOS builds (macOS only):** Xcode with iOS SDK
+
+5. **For regenerating FFI bindings:** LLVM/libclang (for ffigen)
 
 ### Building and Testing
 
@@ -185,14 +191,16 @@ dart run tool/build_all.dart linux-x64 macos-arm64
 
 ### Target Platforms
 
-| Platform | Architecture | Zig Target | Library |
-|----------|-------------|------------|---------|
-| Linux | x64, arm64 | `x86_64-linux-musl`, `aarch64-linux-musl` | libhiredis.so |
-| macOS | x64, arm64 | `x86_64-macos`, `aarch64-macos` | libhiredis.dylib |
-| Windows | x64 | `x86_64-windows` | hiredis.dll |
-| Android | arm64, arm, x64 | `aarch64-linux-musl`, `arm-linux-musleabihf`, `x86_64-linux-musl` | libhiredis.so |
-| iOS | arm64 | `aarch64-ios` | libhiredis.a |
-| iOS Simulator | arm64, x64 | `aarch64-ios-simulator`, `x86_64-ios-simulator` | libhiredis.dylib |
+| Platform | Architecture | Toolchain | Target | Library |
+|----------|-------------|-----------|--------|---------|
+| Linux | x64, arm64 | Zig | `x86_64-linux-musl`, `aarch64-linux-musl` | libhiredis.so |
+| macOS | x64, arm64 | Zig | `x86_64-macos`, `aarch64-macos` | libhiredis.dylib |
+| Windows | x64 | Zig | `x86_64-windows` | hiredis.dll |
+| Android | arm64, arm, x64 | NDK | `aarch64-linux-android`, etc. | libhiredis.so |
+| iOS | arm64 | Zig | `aarch64-ios` | libhiredis.a |
+| iOS Simulator | arm64, x64 | Zig | `aarch64-ios-simulator`, `x86_64-ios-simulator` | libhiredis.dylib |
+
+**Note:** Android uses NDK (not Zig) because Android's Bionic libc has different runtime symbols than musl (e.g., `__errno` vs `__errno_location`). Zig-built musl binaries fail to load on Android.
 
 ### Regenerating FFI Bindings
 

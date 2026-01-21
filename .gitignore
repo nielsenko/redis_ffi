@@ -10,6 +10,9 @@ pubspec.lock
 native/.zig-cache/
 native/zig-out/
 
+# Generated Android libc config files
+native/android-libc-*.txt
+
 # Prebuilt libraries (built via tool/build_all.dart)
 native/lib/
 

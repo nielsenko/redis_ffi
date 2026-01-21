@@ -30,24 +30,32 @@ String get zigVersion {
 
 /// Target configurations: platform name -> zig target triple.
 ///
-/// Linux and Android use musl libc for static linking (no glibc dependency).
+/// Linux uses musl libc for static linking (no glibc version dependency).
+/// Android uses NDK (Bionic libc) - cannot use musl as symbols differ at runtime.
 /// iOS requires Xcode SDK (only builds on macOS).
-const targets = <String, String>{
+const zigTargets = <String, String>{
   // Desktop platforms
   'linux-x64': 'x86_64-linux-musl',
   'linux-arm64': 'aarch64-linux-musl',
   'macos-x64': 'x86_64-macos',
   'macos-arm64': 'aarch64-macos',
   'windows-x64': 'x86_64-windows',
-  // Android (uses musl - compatible with Linux kernel)
-  'android-arm64': 'aarch64-linux-musl',
-  'android-arm': 'arm-linux-musleabihf',
-  'android-x64': 'x86_64-linux-musl',
   // iOS (requires Xcode SDK on macOS)
   'ios-arm64': 'aarch64-ios',
   'ios-simulator-arm64': 'aarch64-ios-simulator',
   'ios-simulator-x64': 'x86_64-ios-simulator',
 };
+
+/// Android targets use Zig with NDK libc configuration.
+/// Maps platform name to Zig target triple.
+const androidTargets = <String, String>{
+  'android-arm64': 'aarch64-linux-android',
+  'android-arm': 'arm-linux-androideabi',
+  'android-x64': 'x86_64-linux-android',
+};
+
+/// All supported targets.
+Map<String, String> get targets => {...zigTargets, ...androidTargets};
 
 Future<void> main(List<String> args) async {
   final stopwatch = Stopwatch()..start();
@@ -77,11 +85,16 @@ Future<void> main(List<String> args) async {
   var failCount = 0;
 
   for (final platform in platformsToBuild) {
-    final zigTarget = targets[platform]!;
-    print('\n--- Building for $platform ($zigTarget) ---');
+    final target = targets[platform]!;
+    final isAndroid = androidTargets.containsKey(platform);
+    print('\n--- Building for $platform ($target) ---');
 
     try {
-      await _buildForTarget(platform, zigTarget);
+      if (isAndroid) {
+        await _buildForAndroid(platform, target);
+      } else {
+        await _buildForTarget(platform, target);
+      }
       successCount++;
       print('  OK: $platform');
     } catch (e) {
@@ -240,4 +253,158 @@ Future<void> _buildForTarget(String platform, String zigTarget) async {
   }
 
   print('  Built: ${files.map((f) => f.path.split('/').last).join(', ')}');
+}
+
+/// Finds the Android NDK path.
+Future<String> _findNdkPath() async {
+  // Check ANDROID_NDK_HOME first
+  final ndkHome = Platform.environment['ANDROID_NDK_HOME'];
+  if (ndkHome != null && await Directory(ndkHome).exists()) {
+    return ndkHome;
+  }
+
+  // Check ANDROID_HOME/ndk
+  final androidHome =
+      Platform.environment['ANDROID_HOME'] ??
+      Platform.environment['ANDROID_SDK_ROOT'];
+  if (androidHome != null) {
+    final ndkDir = Directory('$androidHome/ndk');
+    if (await ndkDir.exists()) {
+      // Find the latest NDK version
+      final versions = await ndkDir.list().toList();
+      if (versions.isNotEmpty) {
+        // Sort by version and pick the latest
+        final sorted = versions.map((e) => e.path.split('/').last).toList()
+          ..sort();
+        return '${ndkDir.path}/${sorted.last}';
+      }
+    }
+  }
+
+  // Check common locations
+  final commonPaths = [
+    if (Platform.isMacOS)
+      '${Platform.environment['HOME']}/Library/Android/sdk/ndk',
+    if (Platform.isLinux) '${Platform.environment['HOME']}/Android/Sdk/ndk',
+    if (Platform.isWindows)
+      '${Platform.environment['LOCALAPPDATA']}\\Android\\Sdk\\ndk',
+  ];
+
+  for (final path in commonPaths) {
+    final ndkDir = Directory(path);
+    if (await ndkDir.exists()) {
+      final versions = await ndkDir.list().toList();
+      if (versions.isNotEmpty) {
+        final sorted = versions.map((e) => e.path.split('/').last).toList()
+          ..sort();
+        return '${ndkDir.path}/${sorted.last}';
+      }
+    }
+  }
+
+  throw Exception(
+    'Android NDK not found. Please install it via Android Studio or set ANDROID_NDK_HOME.',
+  );
+}
+
+/// Builds for Android using Zig with NDK libc configuration.
+///
+/// Zig doesn't bundle Android's Bionic libc, so we create a libc config file
+/// that points to the NDK sysroot. This allows Zig to compile for Android
+/// while using Bionic's headers and libraries.
+Future<void> _buildForAndroid(String platform, String zigTarget) async {
+  final scriptDir = File(Platform.script.toFilePath()).parent.parent.path;
+  final nativeDir = '$scriptDir/native';
+  final outputDir = '$nativeDir/lib/$platform';
+
+  // Ensure output directory exists
+  await Directory(outputDir).create(recursive: true);
+
+  // Find NDK and create libc config
+  final ndkPath = await _findNdkPath();
+  print('  Using NDK: $ndkPath');
+
+  final libcConfigPath = await _createAndroidLibcConfig(
+    nativeDir,
+    ndkPath,
+    zigTarget,
+  );
+
+  // Build with zig using the libc config
+  final args = [
+    'build',
+    '-Dtarget=$zigTarget',
+    '-Doptimize=ReleaseFast',
+    '--libc',
+    libcConfigPath,
+    '-p',
+    outputDir,
+  ];
+
+  final result = await Process.run('zig', args, workingDirectory: nativeDir);
+
+  if (result.exitCode != 0) {
+    throw Exception(
+      'zig build failed:\n'
+      'stdout: ${result.stdout}\n'
+      'stderr: ${result.stderr}',
+    );
+  }
+
+  // Verify output exists
+  final libDir = Directory('$outputDir/lib');
+  if (!await libDir.exists()) {
+    throw Exception('Build succeeded but no lib directory created');
+  }
+
+  final files = await libDir.list().toList();
+  if (files.isEmpty) {
+    throw Exception('Build succeeded but no library files created');
+  }
+
+  print('  Built: ${files.map((f) => f.path.split('/').last).join(', ')}');
+}
+
+/// Creates a libc configuration file for Android NDK.
+///
+/// This tells Zig where to find Bionic headers and libraries.
+Future<String> _createAndroidLibcConfig(
+  String nativeDir,
+  String ndkPath,
+  String zigTarget,
+) async {
+  // Determine host platform for NDK toolchain
+  final hostTag = switch (Platform.operatingSystem) {
+    'macos' => 'darwin-x86_64',
+    'linux' => 'linux-x86_64',
+    'windows' => 'windows-x86_64',
+    _ => throw Exception('Unsupported host platform for NDK'),
+  };
+
+  final sysroot = '$ndkPath/toolchains/llvm/prebuilt/$hostTag/sysroot';
+
+  // Map zig target to NDK target triple
+  final ndkTriple = switch (zigTarget) {
+    'x86_64-linux-android' => 'x86_64-linux-android',
+    'aarch64-linux-android' => 'aarch64-linux-android',
+    'arm-linux-androideabi' => 'arm-linux-androideabi',
+    _ => throw Exception('Unknown Android target: $zigTarget'),
+  };
+
+  // API level 21 is minimum for modern NDKs
+  const apiLevel = '21';
+
+  final configContent =
+      '''
+include_dir=$sysroot/usr/include
+sys_include_dir=$sysroot/usr/include/$ndkTriple
+crt_dir=$sysroot/usr/lib/$ndkTriple/$apiLevel
+msvc_lib_dir=
+kernel32_lib_dir=
+gcc_dir=
+''';
+
+  final configFile = File('$nativeDir/android-libc-$zigTarget.txt');
+  await configFile.writeAsString(configContent);
+  return configFile.path;
 }
