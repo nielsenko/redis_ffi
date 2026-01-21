@@ -1,0 +1,21 @@
+# Files to exclude from published package.
+#
+# When .pubignore exists, .gitignore is NOT used for publishing.
+# We want to include native/lib/ (prebuilt binaries) in the package,
+# but exclude build artifacts and development files.
+
+# Dart build artifacts
+.dart_tool/
+
+# Zig build artifacts (not needed - we include prebuilt binaries)
+native/.zig-cache/
+native/zig-out/
+
+# Development files
+dump.rdb
+
+# CI/CD
+.github/
+
+# The native/lib/ directory with prebuilt binaries is NOT ignored here,
+# so it will be included in the published package.
