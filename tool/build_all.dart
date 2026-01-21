@@ -27,7 +27,7 @@ String get zigVersion {
 /// Target configurations: platform name -> zig target triple.
 ///
 /// Linux and Android use musl libc for static linking (no glibc dependency).
-/// iOS is excluded because Zig doesn't bundle iOS SDK headers.
+/// iOS requires Xcode SDK (only builds on macOS).
 const targets = <String, String>{
   // Desktop platforms
   'linux-x64': 'x86_64-linux-musl',
@@ -39,6 +39,8 @@ const targets = <String, String>{
   'android-arm64': 'aarch64-linux-musl',
   'android-arm': 'arm-linux-musleabihf',
   'android-x64': 'x86_64-linux-musl',
+  // iOS (requires Xcode SDK on macOS)
+  'ios-arm64': 'aarch64-ios',
 };
 
 Future<void> main(List<String> args) async {
@@ -169,6 +171,21 @@ Future<void> _ensureZigVersion() async {
   print('  Using Zig $installedVersion');
 }
 
+Future<String> _getIosSysroot() async {
+  final result = await Process.run('xcrun', [
+    '--sdk',
+    'iphoneos',
+    '--show-sdk-path',
+  ]);
+  if (result.exitCode != 0) {
+    throw Exception(
+      'Failed to get iOS SDK path. Is Xcode installed?\n'
+      'stderr: ${result.stderr}',
+    );
+  }
+  return result.stdout.toString().trim();
+}
+
 Future<void> _buildForTarget(String platform, String zigTarget) async {
   final scriptDir = File(Platform.script.toFilePath()).parent.parent.path;
   final nativeDir = '$scriptDir/native';
@@ -177,14 +194,27 @@ Future<void> _buildForTarget(String platform, String zigTarget) async {
   // Ensure output directory exists
   await Directory(outputDir).create(recursive: true);
 
-  // Run zig build
-  final result = await Process.run('zig', [
+  // Build zig arguments
+  final args = [
     'build',
     '-Dtarget=$zigTarget',
     '-Doptimize=ReleaseFast',
     '-p',
     outputDir,
-  ], workingDirectory: nativeDir);
+  ];
+
+  // iOS requires Xcode SDK sysroot (only available on macOS)
+  if (platform == 'ios-arm64') {
+    if (!Platform.isMacOS) {
+      throw Exception('iOS builds require macOS with Xcode installed');
+    }
+    final sysroot = await _getIosSysroot();
+    args.add('--sysroot');
+    args.add(sysroot);
+  }
+
+  // Run zig build
+  final result = await Process.run('zig', args, workingDirectory: nativeDir);
 
   if (result.exitCode != 0) {
     throw Exception(

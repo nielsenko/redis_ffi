@@ -28,6 +28,9 @@ pub fn build(b: *std.Build) void {
         else => &.{},
     };
 
+    // For iOS, we need the SDK sysroot include path
+    const is_ios = target.result.os.tag == .ios;
+
     // Create module for shared library
     const shared_module = b.createModule(.{
         .root_source_file = b.path("src/async_loop.zig"),
@@ -52,6 +55,15 @@ pub fn build(b: *std.Build) void {
 
     // Include path for hiredis headers
     shared_lib.addIncludePath(hiredis_path);
+
+    // For iOS, add SDK include path and library path
+    if (is_ios) {
+        if (b.sysroot) |sysroot| {
+            shared_lib.addSystemIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sysroot}) });
+            // Add library path relative to sysroot (Zig won't prefix it again)
+            shared_lib.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+        }
+    }
 
     for (platform_libs) |libname| {
         shared_lib.linkSystemLibrary(libname);
@@ -101,6 +113,15 @@ pub fn build(b: *std.Build) void {
     });
 
     static_lib.addIncludePath(hiredis_path);
+
+    // For iOS, add SDK include path and library path
+    if (is_ios) {
+        if (b.sysroot) |sysroot| {
+            static_lib.addSystemIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sysroot}) });
+            // Add library path relative to sysroot (Zig won't prefix it again)
+            static_lib.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+        }
+    }
 
     for (platform_libs) |libname| {
         static_lib.linkSystemLibrary(libname);
