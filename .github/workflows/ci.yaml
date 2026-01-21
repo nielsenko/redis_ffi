@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart analyze
+      - run: dart format --set-exit-if-changed .
+
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.0
+      - run: dart pub get
+      - run: dart run tool/build_all.dart --host
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        sdk: [stable, beta]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ matrix.sdk }}
+
+      - name: Install Redis (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          sudo systemctl start redis-server
+
+      - name: Install Redis (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install redis
+          brew services start redis
+
+      - name: Install Redis (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install redis-64 -y
+          Start-Process -FilePath "C:\ProgramData\chocolatey\lib\redis-64\redis-server.exe" -NoNewWindow
+
+      - name: Wait for Redis
+        shell: bash
+        run: sleep 3
+
+      - run: dart pub get
+      - run: dart test

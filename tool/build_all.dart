@@ -89,7 +89,18 @@ String _getHostPlatform() {
 }
 
 String _getHostArch() {
-  // Use uname to detect the architecture
+  if (Platform.isWindows) {
+    // On Windows, use PROCESSOR_ARCHITECTURE environment variable
+    final arch = Platform.environment['PROCESSOR_ARCHITECTURE'] ?? 'AMD64';
+    return switch (arch.toUpperCase()) {
+      'AMD64' || 'X86_64' => 'x64',
+      'ARM64' => 'arm64',
+      'X86' => 'x86',
+      _ => 'x64',
+    };
+  }
+
+  // Use uname on Unix-like systems
   final result = Process.runSync('uname', ['-m']);
   final machine = result.stdout.toString().trim();
 
@@ -105,16 +116,30 @@ String _getHostArch() {
 Future<void> _ensureZigVersion() async {
   print('Checking Zig version...');
 
-  // Check if zigup is available
-  final zigupCheck = await Process.run('which', ['zigup']);
+  // Check if zig is available and has correct version
+  final zigCheck = await Process.run('zig', ['version']);
+  if (zigCheck.exitCode == 0) {
+    final installedVersion = zigCheck.stdout.toString().trim();
+    final expectedPrefix = zigVersion.split('.').take(2).join('.');
+    if (installedVersion.startsWith(expectedPrefix)) {
+      print('  Using Zig $installedVersion');
+      return;
+    }
+    print('  Found Zig $installedVersion, but need $zigVersion');
+  }
+
+  // Use zigup to get the correct version
+  final whichCmd = Platform.isWindows ? 'where' : 'which';
+  final zigupCheck = await Process.run(whichCmd, ['zigup']);
   if (zigupCheck.exitCode != 0) {
     throw Exception(
-      'zigup not found. Please install it from https://github.com/marler8997/zigup',
+      'Zig $zigVersion not found and zigup not available. '
+      'Please install zigup from https://github.com/marler8997/zigup',
     );
   }
 
   // Fetch and set the required version
-  print('  Ensuring Zig $zigVersion is installed...');
+  print('  Ensuring Zig $zigVersion is installed via zigup...');
   final fetchResult = await Process.run('zigup', ['fetch', zigVersion]);
   if (fetchResult.exitCode != 0) {
     throw Exception('Failed to fetch Zig $zigVersion: ${fetchResult.stderr}');
@@ -131,10 +156,6 @@ Future<void> _ensureZigVersion() async {
   final versionResult = await Process.run('zig', ['version']);
   final installedVersion = versionResult.stdout.toString().trim();
   print('  Using Zig $installedVersion');
-
-  if (!installedVersion.startsWith(zigVersion.split('.').take(2).join('.'))) {
-    print('  WARNING: Version mismatch - expected $zigVersion');
-  }
 }
 
 Future<void> _buildForTarget(String platform, String zigTarget) async {
