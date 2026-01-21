@@ -1,3 +1,11 @@
+// Dart build hook for native assets.
+//
+// This hook is invoked by the Dart/Flutter build system to build or locate
+// the native hiredis library for the current target platform.
+//
+// The zig target mapping and iOS sysroot logic here should be kept in sync
+// with tool/build_all.dart which pre-builds for all platforms.
+
 import 'dart:io';
 
 import 'package:code_assets/code_assets.dart';
@@ -28,7 +36,7 @@ void main(List<String> args) async {
         'Prebuilt binary not found at ${prebuiltPath.toFilePath()}',
       );
       stderr.writeln('Building with zig for $platformDir...');
-      await _buildWithZig(packageRoot, targetOS, targetArch);
+      await _buildWithZig(packageRoot, targetOS, targetArch, platformDir);
 
       if (!prebuiltFile.existsSync()) {
         throw Exception(
@@ -87,9 +95,9 @@ Future<void> _buildWithZig(
   Uri packageRoot,
   OS targetOS,
   Architecture targetArch,
+  String platformDir,
 ) async {
   final zigTarget = _getZigTarget(targetOS, targetArch);
-  final platformDir = _getPlatformDir(targetOS, targetArch);
   final outputDir = packageRoot.resolve('native/lib/$platformDir/');
 
   // Ensure output directory exists
@@ -97,14 +105,23 @@ Future<void> _buildWithZig(
 
   final nativeDir = packageRoot.resolve('native/').toFilePath();
 
-  // Build with zig
-  final result = await Process.run('zig', [
+  // Build zig arguments
+  final args = [
     'build',
     '-Dtarget=$zigTarget',
     '-Doptimize=ReleaseFast',
     '-p',
     outputDir.toFilePath(),
-  ], workingDirectory: nativeDir);
+  ];
+
+  // iOS requires Xcode SDK sysroot
+  if (targetOS == OS.iOS) {
+    final sysroot = await _getIosSysroot(simulator: false);
+    args.addAll(['--sysroot', sysroot]);
+  }
+
+  // Build with zig
+  final result = await Process.run('zig', args, workingDirectory: nativeDir);
 
   if (result.exitCode != 0) {
     throw Exception(
@@ -124,14 +141,27 @@ String _getZigTarget(OS os, Architecture arch) {
     _ => throw UnsupportedError('Unsupported architecture: $arch'),
   };
 
+  // Use musl for Linux/Android (static libc, no glibc version dependency)
   final osStr = switch (os) {
-    OS.linux => 'linux-gnu',
+    OS.linux => 'linux-musl',
     OS.macOS => 'macos',
     OS.windows => 'windows',
-    OS.android => 'linux-android',
+    OS.android => arch == Architecture.arm ? 'linux-musleabihf' : 'linux-musl',
     OS.iOS => 'ios',
     _ => throw UnsupportedError('Unsupported OS: $os'),
   };
 
   return '$archStr-$osStr';
+}
+
+Future<String> _getIosSysroot({required bool simulator}) async {
+  final sdk = simulator ? 'iphonesimulator' : 'iphoneos';
+  final result = await Process.run('xcrun', ['--sdk', sdk, '--show-sdk-path']);
+  if (result.exitCode != 0) {
+    throw Exception(
+      'Failed to get iOS SDK path. Is Xcode installed?\n'
+      'stderr: ${result.stderr}',
+    );
+  }
+  return result.stdout.toString().trim();
 }

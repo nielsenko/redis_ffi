@@ -3,7 +3,11 @@
 // Build script for compiling hiredis for all target platforms.
 //
 // This script uses Zig for cross-compilation, which allows building
-// for all platforms from any host machine.
+// for all platforms from any host machine. The resulting binaries are
+// committed to the repo and bundled with the published package.
+//
+// The zig target mapping and iOS sysroot logic here should be kept in sync
+// with hook/build.dart which handles runtime builds.
 //
 // Prerequisites:
 // - zigup installed (https://github.com/marler8997/zigup)
