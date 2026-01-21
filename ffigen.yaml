@@ -1,6 +1,11 @@
 name: HiredisBindings
 description: FFI bindings for hiredis C library
 output: lib/src/hiredis_bindings.g.dart
+
+# Use @Native annotations for native asset loading
+ffi-native:
+  asset-id: "package:redis_ffi/redis_ffi.dart"
+
 headers:
   entry-points:
     - native/zig-out/include/hiredis.h

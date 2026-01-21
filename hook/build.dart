@@ -23,7 +23,7 @@ void main(List<String> args) async {
     // iOS simulator requires dynamic linking, device requires static linking
     final isIosSimulator =
         targetOS == OS.iOS &&
-        input.config.code.iOS?.targetSdk == IOSSdk.iPhoneSimulator;
+        input.config.code.iOS.targetSdk == IOSSdk.iPhoneSimulator;
     final isIosDevice = targetOS == OS.iOS && !isIosSimulator;
 
     // Determine platform directory name

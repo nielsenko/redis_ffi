@@ -39,21 +39,12 @@ enum RedisReplyType {
 /// is garbage collected, or can be freed manually with [free].
 final class RedisReply implements Finalizable {
   /// The native finalizer that calls freeReplyObject.
-  static NativeFinalizer? _finalizer;
+  static final _finalizer = NativeFinalizer(
+    Native.addressOf<NativeFunction<Void Function(Pointer<Void>)>>(
+      freeReplyObject,
+    ).cast(),
+  );
 
-  /// Initialize the finalizer with the dynamic library.
-  static void _ensureFinalizerInitialized(DynamicLibrary dylib) {
-    if (_finalizer == null) {
-      final freeReplyObjectPtr = dylib
-          .lookup<NativeFunction<Void Function(Pointer<Void>)>>(
-            'freeReplyObject',
-          );
-      _finalizer = NativeFinalizer(freeReplyObjectPtr.cast());
-    }
-  }
-
-  final HiredisBindings _bindings;
-  final DynamicLibrary _dylib;
   final Pointer<redisReply> _reply;
   bool _freed = false;
 
@@ -61,21 +52,16 @@ final class RedisReply implements Finalizable {
   ///
   /// The reply will be automatically freed when this object is garbage
   /// collected, unless [free] is called first.
-  RedisReply._(this._bindings, this._dylib, this._reply) {
-    _ensureFinalizerInitialized(_dylib);
-    _finalizer!.attach(this, _reply.cast(), detach: this);
+  RedisReply._(this._reply) {
+    _finalizer.attach(this, _reply.cast(), detach: this);
   }
 
   /// Creates a RedisReply from a raw pointer.
   ///
   /// Returns null if the pointer is null.
-  static RedisReply? fromPointer(
-    HiredisBindings bindings,
-    DynamicLibrary dylib,
-    Pointer<Void> pointer,
-  ) {
+  static RedisReply? fromPointer(Pointer<Void> pointer) {
     if (pointer == nullptr) return null;
-    return RedisReply._(bindings, dylib, pointer.cast<redisReply>());
+    return RedisReply._(pointer.cast<redisReply>());
   }
 
   /// The type of this reply.
@@ -122,7 +108,7 @@ final class RedisReply implements Finalizable {
     if (elementPtr == nullptr) return null;
     // Note: Child elements are owned by the parent reply and will be freed
     // when the parent is freed. We don't attach a finalizer to them.
-    return _RedisReplyChild._(_bindings, _dylib, elementPtr);
+    return _RedisReplyChild._(elementPtr);
   }
 
   /// Whether this is an error reply.
@@ -171,8 +157,8 @@ final class RedisReply implements Finalizable {
   /// After calling this method, the reply can no longer be used.
   void free() {
     if (_freed) return;
-    _finalizer!.detach(this);
-    _bindings.freeReplyObject(_reply.cast());
+    _finalizer.detach(this);
+    freeReplyObject(_reply.cast());
     _freed = true;
   }
 
@@ -191,9 +177,9 @@ final class RedisReply implements Finalizable {
 
 /// A child reply that doesn't own its memory (owned by parent).
 final class _RedisReplyChild extends RedisReply {
-  _RedisReplyChild._(super.bindings, super.dylib, super.reply) : super._() {
+  _RedisReplyChild._(super.reply) : super._() {
     // Detach from finalizer since parent owns this memory
-    RedisReply._finalizer!.detach(this);
+    RedisReply._finalizer.detach(this);
     _freed = false; // Reset since we don't want to track freed state
   }
 

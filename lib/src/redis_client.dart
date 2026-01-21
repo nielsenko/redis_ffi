@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:ffi';
-import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
@@ -123,7 +122,6 @@ class RedisPubSubMessage {
 class RedisClient {
   final String _host;
   final int _port;
-  final HiredisBindings _bindings;
   final Pointer<redisAsyncContext> _ctx;
   final Pointer<Bool> _stopFlag;
   final NativeCallable<
@@ -142,108 +140,16 @@ class RedisClient {
   RedisClient._(
     this._host,
     this._port,
-    this._bindings,
     this._ctx,
     this._stopFlag,
     this._replyCallback,
     this._loopThreadHandle,
   );
 
-  /// Opens the hiredis dynamic library.
-  static DynamicLibrary _openLibrary() {
-    final libName = _getLibraryName();
-
-    // Try standard library loading first (works when bundled by build hooks)
-    try {
-      return DynamicLibrary.open(libName);
-    } on ArgumentError {
-      // Fall through to search paths
-    }
-
-    // Search in known locations (for development/testing)
-    final searchPaths = _getSearchPaths(libName);
-    for (final path in searchPaths) {
-      final file = File(path);
-      if (file.existsSync()) {
-        return DynamicLibrary.open(path);
-      }
-    }
-
-    throw UnsupportedError(
-      'Could not find $libName. Searched: ${searchPaths.join(", ")}',
-    );
-  }
-
-  static String _getLibraryName() {
-    if (Platform.isMacOS) {
-      return 'libhiredis.dylib';
-    } else if (Platform.isLinux || Platform.isAndroid) {
-      return 'libhiredis.so';
-    } else if (Platform.isWindows) {
-      return 'hiredis.dll';
-    } else {
-      throw UnsupportedError(
-        'Unsupported platform: ${Platform.operatingSystem}',
-      );
-    }
-  }
-
-  static List<String> _getSearchPaths(String libName) {
-    final paths = <String>[];
-
-    // Get the package root by finding pubspec.yaml
-    var dir = Directory.current;
-    while (dir.path != dir.parent.path) {
-      final pubspec = File('${dir.path}/pubspec.yaml');
-      if (pubspec.existsSync()) {
-        final arch = _getArch();
-        final os = _getOS();
-        // Prebuilt location
-        paths.add('${dir.path}/native/lib/$os-$arch/lib/$libName');
-        // Zig build output
-        paths.add('${dir.path}/native/zig-out/lib/$libName');
-        // Dart tool location (from build hooks)
-        paths.add('${dir.path}/.dart_tool/lib/$libName');
-        break;
-      }
-      dir = dir.parent;
-    }
-
-    return paths;
-  }
-
-  static String _getArch() {
-    // Use Dart's sizeOf to detect architecture
-    final pointerSize = sizeOf<IntPtr>();
-    if (pointerSize == 8) {
-      // Check for ARM64 on macOS
-      if (Platform.isMacOS) {
-        final result = Process.runSync('uname', ['-m']);
-        if (result.stdout.toString().trim() == 'arm64') {
-          return 'arm64';
-        }
-      }
-      return 'x64';
-    }
-    return 'x86';
-  }
-
-  static String _getOS() {
-    if (Platform.isMacOS) return 'macos';
-    if (Platform.isLinux) return 'linux';
-    if (Platform.isWindows) return 'windows';
-    if (Platform.isAndroid) return 'android';
-    if (Platform.isIOS) return 'ios';
-    return 'unknown';
-  }
-
   /// Connects to a Redis server.
   ///
   /// Returns a [Future] that completes with the connected client.
   static Future<RedisClient> connect(String host, int port) async {
-    final dylib = _openLibrary();
-    final bindings = HiredisBindings(dylib);
-
     // Set up connection options
     final options = calloc<redisOptions>();
     try {
@@ -264,14 +170,14 @@ class RedisClient {
             REDIS_OPT_NOAUTOFREEREPLIES |
             REDIS_OPT_NO_PUSH_AUTOFREE;
 
-        final ctx = bindings.redisAsyncConnectWithOptions(options);
+        final ctx = redisAsyncConnectWithOptions(options);
         if (ctx == nullptr) {
           throw RedisException('Failed to allocate async context');
         }
 
         if (ctx.ref.err != 0) {
           final errStr = _extractErrorString(ctx.ref.errstr);
-          bindings.redisAsyncFree(ctx);
+          redisAsyncFree(ctx);
           throw RedisException('Connection failed: $errStr');
         }
 
@@ -303,7 +209,7 @@ class RedisClient {
             return;
           }
 
-          completer.complete(RedisReply.fromPointer(bindings, dylib, replyPtr));
+          completer.complete(RedisReply.fromPointer(replyPtr));
         }
 
         final replyCallback =
@@ -316,22 +222,18 @@ class RedisClient {
             >.listener(onReply);
 
         // Start the I/O loop on a background thread
-        final loopThreadHandle = bindings.redis_async_start_loop_thread(
-          ctx,
-          stopFlag,
-        );
+        final loopThreadHandle = redis_async_start_loop_thread(ctx, stopFlag);
 
         if (loopThreadHandle == nullptr) {
           replyCallback.close();
           calloc.free(stopFlag);
-          bindings.redisAsyncFree(ctx);
+          redisAsyncFree(ctx);
           throw RedisException('Failed to start I/O loop thread');
         }
 
         client = RedisClient._(
           host,
           port,
-          bindings,
           ctx,
           stopFlag,
           replyCallback,
@@ -368,7 +270,7 @@ class RedisClient {
       scheduleMicrotask(() {
         _flushScheduled = false;
         if (!_closed) {
-          _bindings.redis_async_flush(_ctx);
+          redis_async_flush(_ctx);
         }
       });
     }
@@ -396,7 +298,7 @@ class RedisClient {
       final privdata = _nextPrivdata++;
       _pendingCallbacks[privdata] = commandId;
 
-      _bindings.redisAsyncCommandArgv(
+      redisAsyncCommandArgv(
         _ctx,
         _replyCallback.nativeFunction.cast(),
         Pointer<Void>.fromAddress(privdata),
@@ -2378,12 +2280,12 @@ class RedisClient {
 
     // Stop the background thread and wait for it to exit
     if (_loopThreadHandle != null) {
-      _bindings.redis_async_stop_loop_thread(_loopThreadHandle!);
+      redis_async_stop_loop_thread(_loopThreadHandle!);
       _loopThreadHandle = null;
     }
 
     // Free resources
-    _bindings.redisAsyncFree(_ctx);
+    redisAsyncFree(_ctx);
     _replyCallback.close();
     calloc.free(_stopFlag);
   }
@@ -2393,7 +2295,6 @@ class RedisClient {
 
 /// A subscription that manages its own Redis connection.
 class _RedisSubscription {
-  final HiredisBindings _bindings;
   final Pointer<redisAsyncContext> _ctx;
   final Pointer<Bool> _stopFlag;
   final NativeCallable<
@@ -2404,7 +2305,6 @@ class _RedisSubscription {
   var _closed = false;
 
   _RedisSubscription._(
-    this._bindings,
     this._ctx,
     this._stopFlag,
     this._replyCallback,
@@ -2424,9 +2324,6 @@ class _RedisSubscription {
     controller = StreamController<RedisPubSubMessage>(
       onListen: () {
         try {
-          final dylib = RedisClient._openLibrary();
-          final bindings = HiredisBindings(dylib);
-
           final options = calloc<redisOptions>();
           try {
             // Zero-initialize
@@ -2444,7 +2341,7 @@ class _RedisSubscription {
                   REDIS_OPT_NOAUTOFREEREPLIES |
                   REDIS_OPT_NO_PUSH_AUTOFREE;
 
-              final ctx = bindings.redisAsyncConnectWithOptions(options);
+              final ctx = redisAsyncConnectWithOptions(options);
               if (ctx == nullptr) {
                 controller.addError(
                   RedisException('Failed to allocate async context'),
@@ -2454,7 +2351,7 @@ class _RedisSubscription {
 
               if (ctx.ref.err != 0) {
                 final errStr = ctx.ref.errstr.cast<Utf8>().toDartString();
-                bindings.redisAsyncFree(ctx);
+                redisAsyncFree(ctx);
                 controller.addError(
                   RedisException('Connection failed: $errStr'),
                 );
@@ -2501,7 +2398,7 @@ class _RedisSubscription {
                     )
                   >.listener(onReply);
 
-              final loopThreadHandle = bindings.redis_async_start_loop_thread(
+              final loopThreadHandle = redis_async_start_loop_thread(
                 ctx,
                 stopFlag,
               );
@@ -2509,7 +2406,7 @@ class _RedisSubscription {
               if (loopThreadHandle == nullptr) {
                 replyCallback.close();
                 calloc.free(stopFlag);
-                bindings.redisAsyncFree(ctx);
+                redisAsyncFree(ctx);
                 controller.addError(
                   RedisException('Failed to start I/O loop thread'),
                 );
@@ -2517,7 +2414,6 @@ class _RedisSubscription {
               }
 
               subscription = _RedisSubscription._(
-                bindings,
                 ctx,
                 stopFlag,
                 replyCallback,
@@ -2564,7 +2460,7 @@ class _RedisSubscription {
         argvlen[i + 1] = targets[i].length;
       }
 
-      _bindings.redisAsyncCommandArgv(
+      redisAsyncCommandArgv(
         _ctx,
         _replyCallback.nativeFunction.cast(),
         nullptr,
@@ -2573,7 +2469,7 @@ class _RedisSubscription {
         argvlen,
       );
 
-      _bindings.redis_async_flush(_ctx);
+      redis_async_flush(_ctx);
     } finally {
       for (var i = 0; i < argc; i++) {
         if (argv[i] != nullptr) {
@@ -2592,11 +2488,11 @@ class _RedisSubscription {
     _stopFlag.value = true;
 
     if (_loopThreadHandle != null) {
-      _bindings.redis_async_stop_loop_thread(_loopThreadHandle!);
+      redis_async_stop_loop_thread(_loopThreadHandle!);
       _loopThreadHandle = null;
     }
 
-    _bindings.redisAsyncFree(_ctx);
+    redisAsyncFree(_ctx);
     _replyCallback.close();
     calloc.free(_stopFlag);
   }

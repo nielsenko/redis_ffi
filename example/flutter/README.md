@@ -20,6 +20,16 @@ flutter create . --platforms=macos
 flutter create . --platforms=ios,android,macos
 ```
 
+## macOS Network Permissions
+
+macOS apps are sandboxed by default. To allow network connections, add the
+following to `macos/Runner/DebugProfile.entitlements` and `macos/Runner/Release.entitlements`:
+
+```xml
+<key>com.apple.security.network.client</key>
+<true/>
+```
+
 ## Running
 
 ```bash
@@ -35,5 +45,6 @@ flutter run -d macos
 
 ## Note
 
-The default host is `10.0.2.2` which is the host machine from Android emulator.
-Change to `localhost` or your Redis server's IP as needed.
+- The default host is `10.0.2.2` which is the host machine from Android emulator
+- For macOS/iOS simulator, use `localhost` or `127.0.0.1`
+- Change to your Redis server's IP as needed
