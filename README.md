@@ -160,23 +160,27 @@ If you're contributing to this package or using it as a git dependency, you'll n
 
 4. **For regenerating FFI bindings:** LLVM/libclang (for ffigen)
 
-### Building
+### Building and Testing
 
 ```bash
-# Get dependencies
+# Get dependencies and run tests
+# (the build hook automatically compiles the native library for your platform)
 dart pub get
+dart test  # requires Redis server running on localhost:6379
+```
 
-# Build for your current platform (zigup handles Zig installation)
-dart run tool/build_all.dart --host
+### Publishing (maintainers only)
 
-# Build for all platforms
+Before publishing, build native libraries for all platforms:
+
+```bash
 dart run tool/build_all.dart
+```
 
-# Build for a specific platform
+Or build for specific platforms:
+
+```bash
 dart run tool/build_all.dart linux-x64 macos-arm64
-
-# Run tests (requires Redis server running on localhost:6379)
-dart test
 ```
 
 ### Target Platforms

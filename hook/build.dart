@@ -19,9 +19,16 @@ void main(List<String> args) async {
     final targetOS = input.config.code.targetOS;
     final targetArch = input.config.code.targetArchitecture;
 
+    // Detect iOS simulator vs device
+    // iOS simulator requires dynamic linking, device requires static linking
+    final isIosSimulator =
+        targetOS == OS.iOS &&
+        input.config.code.iOS?.targetSdk == IOSSdk.iPhoneSimulator;
+    final isIosDevice = targetOS == OS.iOS && !isIosSimulator;
+
     // Determine platform directory name
-    final platformDir = _getPlatformDir(targetOS, targetArch);
-    final libName = _getLibraryName(targetOS);
+    final platformDir = _getPlatformDir(targetOS, targetArch, isIosSimulator);
+    final libName = _getLibraryName(targetOS, isIosSimulator);
 
     // Path to prebuilt binary (zig outputs to prefix/lib/)
     final prebuiltPath = packageRoot.resolve(
@@ -36,7 +43,13 @@ void main(List<String> args) async {
         'Prebuilt binary not found at ${prebuiltPath.toFilePath()}',
       );
       stderr.writeln('Building with zig for $platformDir...');
-      await _buildWithZig(packageRoot, targetOS, targetArch, platformDir);
+      await _buildWithZig(
+        packageRoot,
+        targetOS,
+        targetArch,
+        platformDir,
+        isIosSimulator,
+      );
 
       if (!prebuiltFile.existsSync()) {
         throw Exception(
@@ -47,26 +60,25 @@ void main(List<String> args) async {
     }
 
     // Register the code asset
+    // iOS device requires static linking, all others (including iOS simulator) use dynamic
     output.assets.code.add(
       CodeAsset(
         package: input.packageName,
         name: '${input.packageName}.dart',
-        linkMode: targetOS == OS.iOS
-            ? StaticLinking()
-            : DynamicLoadingBundled(),
+        linkMode: isIosDevice ? StaticLinking() : DynamicLoadingBundled(),
         file: prebuiltPath,
       ),
     );
   });
 }
 
-String _getPlatformDir(OS os, Architecture arch) {
+String _getPlatformDir(OS os, Architecture arch, bool isIosSimulator) {
   final osName = switch (os) {
     OS.linux => 'linux',
     OS.macOS => 'macos',
     OS.windows => 'windows',
     OS.android => 'android',
-    OS.iOS => 'ios',
+    OS.iOS => isIosSimulator ? 'ios-simulator' : 'ios',
     _ => throw UnsupportedError('Unsupported OS: $os'),
   };
 
@@ -81,12 +93,13 @@ String _getPlatformDir(OS os, Architecture arch) {
   return '$osName-$archName';
 }
 
-String _getLibraryName(OS os) {
+String _getLibraryName(OS os, bool isIosSimulator) {
   return switch (os) {
     OS.linux || OS.android => 'libhiredis.so',
     OS.macOS => 'libhiredis.dylib',
     OS.windows => 'hiredis.dll',
-    OS.iOS => 'libhiredis.a',
+    // iOS simulator uses dynamic library, device uses static
+    OS.iOS => isIosSimulator ? 'libhiredis.dylib' : 'libhiredis.a',
     _ => throw UnsupportedError('Unsupported OS: $os'),
   };
 }
@@ -96,11 +109,12 @@ Future<void> _buildWithZig(
   OS targetOS,
   Architecture targetArch,
   String platformDir,
+  bool isIosSimulator,
 ) async {
   // Ensure correct zig version
   await _ensureZigVersion(packageRoot);
 
-  final zigTarget = _getZigTarget(targetOS, targetArch);
+  final zigTarget = _getZigTarget(targetOS, targetArch, isIosSimulator);
   final outputDir = packageRoot.resolve('native/lib/$platformDir/');
 
   // Ensure output directory exists
@@ -119,7 +133,7 @@ Future<void> _buildWithZig(
 
   // iOS requires Xcode SDK sysroot
   if (targetOS == OS.iOS) {
-    final sysroot = await _getIosSysroot(simulator: false);
+    final sysroot = await _getIosSysroot(simulator: isIosSimulator);
     args.addAll(['--sysroot', sysroot]);
   }
 
@@ -186,7 +200,7 @@ Future<void> _ensureZigVersion(Uri packageRoot) async {
   }
 }
 
-String _getZigTarget(OS os, Architecture arch) {
+String _getZigTarget(OS os, Architecture arch, bool isIosSimulator) {
   final archStr = switch (arch) {
     Architecture.x64 => 'x86_64',
     Architecture.arm64 => 'aarch64',
@@ -201,7 +215,7 @@ String _getZigTarget(OS os, Architecture arch) {
     OS.macOS => 'macos',
     OS.windows => 'windows',
     OS.android => arch == Architecture.arm ? 'linux-musleabihf' : 'linux-musl',
-    OS.iOS => 'ios',
+    OS.iOS => isIosSimulator ? 'ios-simulator' : 'ios',
     _ => throw UnsupportedError('Unsupported OS: $os'),
   };
 

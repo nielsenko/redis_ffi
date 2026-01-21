@@ -69,8 +69,9 @@ pub fn build(b: *std.Build) void {
         shared_lib.linkSystemLibrary(libname);
     }
 
-    // macOS: Add headerpad for install_name_tool compatibility (required by Dart)
-    if (target.result.os.tag == .macos) {
+    // macOS/iOS: Add headerpad for install_name_tool compatibility (required by Dart)
+    // This is needed for shared libraries on Apple platforms
+    if (target.result.os.tag == .macos or target.result.os.tag == .ios) {
         shared_lib.headerpad_max_install_names = true;
     }
 
