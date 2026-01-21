@@ -97,6 +97,9 @@ Future<void> _buildWithZig(
   Architecture targetArch,
   String platformDir,
 ) async {
+  // Ensure correct zig version
+  await _ensureZigVersion(packageRoot);
+
   final zigTarget = _getZigTarget(targetOS, targetArch);
   final outputDir = packageRoot.resolve('native/lib/$platformDir/');
 
@@ -128,6 +131,57 @@ Future<void> _buildWithZig(
       'zig build failed with exit code ${result.exitCode}:\n'
       'stdout: ${result.stdout}\n'
       'stderr: ${result.stderr}',
+    );
+  }
+}
+
+/// Reads the required Zig version from .zig-version file.
+Future<String> _getRequiredZigVersion(Uri packageRoot) async {
+  final versionFile = File(packageRoot.resolve('.zig-version').toFilePath());
+  if (!versionFile.existsSync()) {
+    throw Exception('.zig-version file not found in package');
+  }
+  return (await versionFile.readAsString()).trim();
+}
+
+/// Ensures the correct Zig version is available, using zigup if needed.
+Future<void> _ensureZigVersion(Uri packageRoot) async {
+  final requiredVersion = await _getRequiredZigVersion(packageRoot);
+
+  // Check if zig is available and has correct version
+  final zigCheck = await Process.run('zig', ['version']);
+  if (zigCheck.exitCode == 0) {
+    final installedVersion = (zigCheck.stdout as String).trim();
+    if (installedVersion == requiredVersion) {
+      return; // Correct version already installed
+    }
+    stderr.writeln('Found Zig $installedVersion, but need $requiredVersion');
+  }
+
+  // Try to use zigup to get the correct version
+  final whichCmd = Platform.isWindows ? 'where' : 'which';
+  final zigupCheck = await Process.run(whichCmd, ['zigup']);
+  if (zigupCheck.exitCode != 0) {
+    throw Exception(
+      'Zig $requiredVersion not found and zigup not available.\n'
+      'Please install Zig $requiredVersion manually, or install zigup from:\n'
+      'https://github.com/marler8997/zigup',
+    );
+  }
+
+  // Fetch and set the required version
+  stderr.writeln('Installing Zig $requiredVersion via zigup...');
+  final fetchResult = await Process.run('zigup', ['fetch', requiredVersion]);
+  if (fetchResult.exitCode != 0) {
+    throw Exception(
+      'Failed to fetch Zig $requiredVersion: ${fetchResult.stderr}',
+    );
+  }
+
+  final defaultResult = await Process.run('zigup', [requiredVersion]);
+  if (defaultResult.exitCode != 0) {
+    throw Exception(
+      'Failed to set Zig $requiredVersion as default: ${defaultResult.stderr}',
     );
   }
 }
