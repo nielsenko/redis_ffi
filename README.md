@@ -140,40 +140,63 @@ This package uses Dart's `NativeFinalizer` to automatically free native resource
 
 The package uses hiredis options (`REDICT_OPT_NOAUTOFREE`, `REDICT_OPT_NOAUTOFREEREPLIES`, `REDICT_OPT_NO_PUSH_AUTOFREE`) to ensure Dart has full control over memory lifetime.
 
-## Building from Source
+## Development Setup
 
-For package maintainers or contributors who need to rebuild the native libraries:
+If you're contributing to this package or using it as a git dependency, you'll need to build the native libraries from source.
 
 ### Prerequisites
 
-- [zigup](https://github.com/marler8997/zigup) - Zig version manager
-- LLVM/libclang (for regenerating FFI bindings with ffigen)
+1. **Dart SDK** - Install from [dart.dev](https://dart.dev/get-dart)
 
-### Build Commands
+2. **zigup** - Zig version manager (required for building native code)
+
+   zigup makes it easy to install and switch between Zig versions. The required version is specified in `.zig-version`.
+
+   See [github.com/marler8997/zigup](https://github.com/marler8997/zigup) for installation instructions.
+
+   Once installed, zigup will automatically download the correct Zig version when you build.
+
+3. **For iOS builds (macOS only):** Xcode with iOS SDK
+
+4. **For regenerating FFI bindings:** LLVM/libclang (for ffigen)
+
+### Building
 
 ```bash
-# Build for current platform
-cd native && zig build
+# Get dependencies
+dart pub get
+
+# Build for your current platform (zigup handles Zig installation)
+dart run tool/build_all.dart --host
 
 # Build for all platforms
 dart run tool/build_all.dart
 
-# Build for specific platform
-dart run tool/build_all.dart macos-arm64
+# Build for a specific platform
+dart run tool/build_all.dart linux-x64 macos-arm64
 
-# Regenerate FFI bindings
-dart run ffigen --config ffigen.yaml
+# Run tests (requires Redis server running on localhost:6379)
+dart test
 ```
 
 ### Target Platforms
 
-| Platform | Architecture | Library |
-|----------|-------------|---------|
-| Linux | x64, arm64 | libhiredis.so |
-| macOS | x64, arm64 | libhiredis.dylib |
-| Windows | x64 | hiredis.dll |
-| Android | arm64, arm, x64 | libhiredis.so |
-| iOS | arm64 | libhiredis.a |
+| Platform | Architecture | Zig Target | Library |
+|----------|-------------|------------|---------|
+| Linux | x64, arm64 | `x86_64-linux-musl`, `aarch64-linux-musl` | libhiredis.so |
+| macOS | x64, arm64 | `x86_64-macos`, `aarch64-macos` | libhiredis.dylib |
+| Windows | x64 | `x86_64-windows` | hiredis.dll |
+| Android | arm64, arm, x64 | `aarch64-linux-musl`, `arm-linux-musleabihf`, `x86_64-linux-musl` | libhiredis.so |
+| iOS | arm64 | `aarch64-ios` | libhiredis.a |
+| iOS Simulator | arm64, x64 | `aarch64-ios-simulator`, `x86_64-ios-simulator` | libhiredis.dylib |
+
+### Regenerating FFI Bindings
+
+If you modify the native code or update hiredis:
+
+```bash
+dart run ffigen --config ffigen.yaml
+```
 
 ## License
 
