@@ -124,15 +124,15 @@ Future<void> _ensureZigVersion() async {
   print('Checking Zig version...');
 
   // Check if zig is available and has correct version
+  final requiredVersion = zigVersion;
   final zigCheck = await Process.run('zig', ['version']);
   if (zigCheck.exitCode == 0) {
     final installedVersion = zigCheck.stdout.toString().trim();
-    final expectedPrefix = zigVersion.split('.').take(2).join('.');
-    if (installedVersion.startsWith(expectedPrefix)) {
+    if (installedVersion == requiredVersion) {
       print('  Using Zig $installedVersion');
       return;
     }
-    print('  Found Zig $installedVersion, but need $zigVersion');
+    print('  Found Zig $installedVersion, but need $requiredVersion');
   }
 
   // Use zigup to get the correct version
