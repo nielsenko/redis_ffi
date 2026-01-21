@@ -180,14 +180,11 @@ dart test  # requires Redis server running on localhost:6379
 Before publishing, build native libraries for all platforms:
 
 ```bash
-dart run tool/build_all.dart
+cd native
+zig build -Dall -p lib -Dndk=$ANDROID_NDK_HOME
 ```
 
-Or build for specific platforms:
-
-```bash
-dart run tool/build_all.dart linux-x64 macos-arm64
-```
+This builds for all 11 target platforms and installs to `native/lib/`.
 
 ### Target Platforms
 
@@ -196,11 +193,11 @@ dart run tool/build_all.dart linux-x64 macos-arm64
 | Linux | x64, arm64 | Zig | `x86_64-linux-musl`, `aarch64-linux-musl` | libhiredis.so |
 | macOS | x64, arm64 | Zig | `x86_64-macos`, `aarch64-macos` | libhiredis.dylib |
 | Windows | x64 | Zig | `x86_64-windows` | hiredis.dll |
-| Android | arm64, arm, x64 | NDK | `aarch64-linux-android`, etc. | libhiredis.so |
+| Android | arm64, arm, x64 | Zig + NDK libc | `aarch64-linux-android`, etc. | libhiredis.so |
 | iOS | arm64 | Zig | `aarch64-ios` | libhiredis.a |
 | iOS Simulator | arm64, x64 | Zig | `aarch64-ios-simulator`, `x86_64-ios-simulator` | libhiredis.dylib |
 
-**Note:** Android uses NDK (not Zig) because Android's Bionic libc has different runtime symbols than musl (e.g., `__errno` vs `__errno_location`). Zig-built musl binaries fail to load on Android.
+**Note:** Android builds use Zig as the compiler but require Android NDK for libc headers and libraries. Zig's bundled musl libc has different runtime symbols than Android's Bionic (e.g., `__errno_location` vs `__errno`).
 
 ### Regenerating FFI Bindings
 
