@@ -15,7 +15,7 @@
 import 'dart:io';
 
 /// Required Zig version (must match .zig-version file).
-const zigVersion = '0.14.0';
+const zigVersion = '0.15.2';
 
 /// Target configurations: platform name -> zig target triple.
 ///

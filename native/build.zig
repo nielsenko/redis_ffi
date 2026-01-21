@@ -28,13 +28,19 @@ pub fn build(b: *std.Build) void {
         else => &.{},
     };
 
-    // Build shared library for FFI
-    const shared_lib = b.addSharedLibrary(.{
-        .name = "hiredis",
+    // Create module for shared library
+    const shared_module = b.createModule(.{
         .root_source_file = b.path("src/async_loop.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
+    });
+
+    // Build shared library for FFI
+    const shared_lib = b.addLibrary(.{
+        .name = "hiredis",
+        .linkage = .dynamic,
+        .root_module = shared_module,
     });
 
     // Add hiredis C sources
@@ -73,13 +79,19 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(shared_lib);
 
-    // Also build static library
-    const static_lib = b.addStaticLibrary(.{
-        .name = "hiredis",
+    // Create module for static library
+    const static_module = b.createModule(.{
         .root_source_file = b.path("src/async_loop.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
+    });
+
+    // Also build static library
+    const static_lib = b.addLibrary(.{
+        .name = "hiredis",
+        .linkage = .static,
+        .root_module = static_module,
     });
 
     static_lib.addCSourceFiles(.{

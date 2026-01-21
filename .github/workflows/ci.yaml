@@ -31,7 +31,7 @@ jobs:
           sdk: stable
       - uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.14.0
+          version: 0.15.2
       - run: dart pub get
       - run: dart run tool/build_all.dart --host
 
