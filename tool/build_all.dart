@@ -26,15 +26,19 @@ String get zigVersion {
 
 /// Target configurations: platform name -> zig target triple.
 ///
-/// Note: Android and iOS are excluded because Zig doesn't bundle their libc.
-/// For mobile platforms, use Flutter's build system which handles NDK/SDK
-/// automatically via the `native_toolchain_c` package in hook/build.dart.
+/// Linux and Android use musl libc for static linking (no glibc dependency).
+/// iOS is excluded because Zig doesn't bundle iOS SDK headers.
 const targets = <String, String>{
-  'linux-x64': 'x86_64-linux-gnu',
-  'linux-arm64': 'aarch64-linux-gnu',
+  // Desktop platforms
+  'linux-x64': 'x86_64-linux-musl',
+  'linux-arm64': 'aarch64-linux-musl',
   'macos-x64': 'x86_64-macos',
   'macos-arm64': 'aarch64-macos',
   'windows-x64': 'x86_64-windows',
+  // Android (uses musl - compatible with Linux kernel)
+  'android-arm64': 'aarch64-linux-musl',
+  'android-arm': 'arm-linux-musleabihf',
+  'android-x64': 'x86_64-linux-musl',
 };
 
 Future<void> main(List<String> args) async {
