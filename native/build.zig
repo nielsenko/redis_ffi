@@ -14,7 +14,9 @@ const platforms = [_]Platform{
     .{ .name = "linux-arm64", .target = .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .gnu } },
     .{ .name = "macos-x64", .target = .{ .cpu_arch = .x86_64, .os_tag = .macos } },
     .{ .name = "macos-arm64", .target = .{ .cpu_arch = .aarch64, .os_tag = .macos } },
-    .{ .name = "windows-x64", .target = .{ .cpu_arch = .x86_64, .os_tag = .windows } },
+    // Windows disabled: DLL symbol export issues (hiredis lacks __declspec(dllexport))
+    // TODO: Re-enable when Dart native assets supports static linking on Windows
+    // .{ .name = "windows-x64", .target = .{ .cpu_arch = .x86_64, .os_tag = .windows } },
     // Android (uses NDK libc)
     .{ .name = "android-x64", .target = .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .android } },
     .{ .name = "android-arm64", .target = .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .android } },
@@ -194,13 +196,6 @@ fn buildLibraryWithOptimize(
 
     const cflags = &[_][]const u8{"-std=c99"};
 
-    // Platform-specific libraries
-    const platform_libs: []const []const u8 = switch (target.result.os.tag) {
-        .windows => &.{ "ws2_32", "crypt32" },
-        else => &.{},
-    };
-
-    const is_windows = target.result.os.tag == .windows;
     const is_ios = target.result.os.tag == .ios;
     const is_apple = target.result.os.tag == .macos or is_ios;
     const is_android = target.result.abi == .android or target.result.abi == .androideabi;
@@ -219,11 +214,6 @@ fn buildLibraryWithOptimize(
         .linkage = linkage,
         .root_module = module,
     });
-
-    // On Windows, export all C symbols from the DLL
-    if (is_windows and linkage == .dynamic) {
-        lib.rdynamic = true;
-    }
 
     // Add hiredis C sources
     lib.addCSourceFiles(.{
@@ -259,10 +249,6 @@ fn buildLibraryWithOptimize(
             // Set library path relative to sysroot
             lib.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sr}) });
         }
-    }
-
-    for (platform_libs) |libname| {
-        lib.linkSystemLibrary(libname);
     }
 
     // macOS/iOS: Add headerpad for install_name_tool compatibility (required by Dart)

@@ -83,9 +83,9 @@ String _getPlatformDir(OS os, Architecture arch, bool isIosSimulator) {
   final osName = switch (os) {
     OS.linux => 'linux',
     OS.macOS => 'macos',
-    OS.windows => 'windows',
     OS.android => 'android',
     OS.iOS => isIosSimulator ? 'ios-simulator' : 'ios',
+    // Windows not yet supported: DLL symbol export issues
     _ => throw UnsupportedError('Unsupported OS: $os'),
   };
 
@@ -104,9 +104,9 @@ String _getLibraryName(OS os, bool isIosSimulator) {
   return switch (os) {
     OS.linux || OS.android => 'libhiredis.so',
     OS.macOS => 'libhiredis.dylib',
-    OS.windows => 'hiredis.dll',
     // iOS simulator uses dynamic library, device uses static
     OS.iOS => isIosSimulator ? 'libhiredis.dylib' : 'libhiredis.a',
+    // Windows not yet supported: DLL symbol export issues
     _ => throw UnsupportedError('Unsupported OS: $os'),
   };
 }
@@ -153,18 +153,6 @@ Future<void> _buildWithZig(
     final ndkPath = await _findNdkPath();
     stderr.writeln('Using NDK: $ndkPath');
     args.add('-Dndk=$ndkPath');
-  }
-
-  // On Windows, explicitly set cache directories to avoid AppDataDirUnavailable error
-  // (CI runners may not have LOCALAPPDATA set properly)
-  if (Platform.isWindows) {
-    final tempDir = Directory.systemTemp.path;
-    args.addAll([
-      '--cache-dir',
-      '$tempDir\\zig-cache',
-      '--global-cache-dir',
-      '$tempDir\\zig-global-cache',
-    ]);
   }
 
   // Build with zig
