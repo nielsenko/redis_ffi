@@ -200,6 +200,7 @@ fn buildLibraryWithOptimize(
         else => &.{},
     };
 
+    const is_windows = target.result.os.tag == .windows;
     const is_ios = target.result.os.tag == .ios;
     const is_apple = target.result.os.tag == .macos or is_ios;
     const is_android = target.result.abi == .android or target.result.abi == .androideabi;
@@ -218,6 +219,11 @@ fn buildLibraryWithOptimize(
         .linkage = linkage,
         .root_module = module,
     });
+
+    // On Windows, export all C symbols from the DLL
+    if (is_windows and linkage == .dynamic) {
+        lib.rdynamic = true;
+    }
 
     // Add hiredis C sources
     lib.addCSourceFiles(.{
