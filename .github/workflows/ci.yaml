@@ -57,6 +57,9 @@ jobs:
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: ${{ matrix.sdk }}
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.15.2
 
       - name: Install Redis (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
