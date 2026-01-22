@@ -174,9 +174,9 @@ pub const EventLoopState = struct {
     ctx_mutex: std.Thread.Mutex, // For hiredis context access
     // Lock-free command queue
     command_queue: CommandQueue,
-    // Pipe for waking up the poll thread when commands are queued
-    wakeup_read_fd: std.posix.fd_t,
-    wakeup_write_fd: std.posix.fd_t,
+    // Pipe for waking up the poll thread when commands are queued (POSIX only)
+    wakeup_read_fd: if (is_windows) void else std.posix.fd_t,
+    wakeup_write_fd: if (is_windows) void else std.posix.fd_t,
 };
 
 /// Initialize the Dart API DL.
@@ -212,8 +212,8 @@ export fn redis_event_loop_create(
         .mutex = .{},
         .ctx_mutex = .{},
         .command_queue = undefined,
-        .wakeup_read_fd = if (is_windows) -1 else pipe_fds[0],
-        .wakeup_write_fd = if (is_windows) -1 else pipe_fds[1],
+        .wakeup_read_fd = if (is_windows) {} else pipe_fds[0],
+        .wakeup_write_fd = if (is_windows) {} else pipe_fds[1],
     };
     state.command_queue.init();
 
@@ -241,10 +241,10 @@ export fn redis_event_loop_destroy(state: ?*EventLoopState) callconv(.c) void {
     // Free the async context - we use REDIS_OPT_NOAUTOFREE so we control when it's freed
     c.redisAsyncFree(s.ctx);
 
-    // Close wakeup pipe
+    // Close wakeup pipe (POSIX only)
     if (!is_windows) {
-        if (s.wakeup_read_fd >= 0) std.posix.close(s.wakeup_read_fd);
-        if (s.wakeup_write_fd >= 0) std.posix.close(s.wakeup_write_fd);
+        std.posix.close(s.wakeup_read_fd);
+        std.posix.close(s.wakeup_write_fd);
     }
     std.heap.c_allocator.destroy(s);
 }
@@ -287,7 +287,6 @@ export fn redis_event_loop_stop(state: ?*EventLoopState) callconv(.c) void {
 export fn redis_event_loop_wakeup(state: ?*EventLoopState) callconv(.c) void {
     const s = state orelse return;
     if (is_windows) return; // TODO: Windows wakeup mechanism
-    if (s.wakeup_write_fd < 0) return;
 
     // Write a single byte to wake up the poll
     const buf = [_]u8{1};
@@ -395,15 +394,13 @@ fn pollAndHandlePosix(state: *EventLoopState) i32 {
         .{ .fd = wakeup_fd, .events = std.posix.POLL.IN, .revents = 0 },
     };
 
-    const nfds: usize = if (wakeup_fd >= 0) 2 else 1;
-
     // Block until events occur - wakeup pipe signals when commands are queued
-    const poll_result = std.posix.poll(fds[0..nfds], -1) catch return -1;
+    const poll_result = std.posix.poll(&fds, -1) catch return -1;
 
     if (poll_result == 0) return 0; // Timeout (shouldn't happen with -1)
 
     // Drain wakeup pipe if signaled
-    if (nfds > 1 and fds[1].revents & std.posix.POLL.IN != 0) {
+    if (fds[1].revents & std.posix.POLL.IN != 0) {
         var buf: [64]u8 = undefined;
         _ = std.posix.read(wakeup_fd, &buf) catch {};
     }

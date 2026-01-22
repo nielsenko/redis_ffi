@@ -3,9 +3,12 @@
 // This hook is invoked by the Dart/Flutter build system to build or locate
 // the native hiredis library for the current target platform.
 //
+// Behavior depends on how the package is being used:
+// - Published package (from pub.dev): Uses prebuilt binaries, no zig required
+// - Development (git checkout): Always runs zig build for correct caching
+//
 // All target configuration (zig targets, iOS sysroot, Android NDK libc) is
-// handled by native/build.zig. This hook just invokes:
-//   zig build -Dplatform=<platform-name> [-Dndk=<path>]
+// handled by native/build.zig.
 
 import 'dart:io';
 
@@ -31,19 +34,15 @@ void main(List<String> args) async {
     final platformDir = _getPlatformDir(targetOS, targetArch, isIosSimulator);
     final libName = _getLibraryName(targetOS, isIosSimulator);
 
-    // Path to prebuilt binary
-    final prebuiltPath = packageRoot.resolve(
-      'native/lib/$platformDir/$libName',
-    );
+    // Path to output binary
+    final binaryPath = packageRoot.resolve('native/lib/$platformDir/$libName');
+    final binaryFile = File(binaryPath.toFilePath());
 
-    final prebuiltFile = File(prebuiltPath.toFilePath());
+    // Check if we're in development mode (git checkout) or published package
+    final isDevelopment = _isDevelopmentMode(packageRoot);
 
-    if (!prebuiltFile.existsSync()) {
-      // Development mode: build with zig if binary doesn't exist
-      stderr.writeln(
-        'Prebuilt binary not found at ${prebuiltPath.toFilePath()}',
-      );
-      stderr.writeln('Building with zig for $platformDir...');
+    if (isDevelopment) {
+      // Development: always run zig build (handles its own caching)
       await _buildWithZig(
         packageRoot,
         targetOS,
@@ -51,13 +50,20 @@ void main(List<String> args) async {
         platformDir,
         isIosSimulator,
       );
+    }
 
-      if (!prebuiltFile.existsSync()) {
+    if (!binaryFile.existsSync()) {
+      if (!isDevelopment) {
+        // Published package but binary missing - this shouldn't happen
         throw Exception(
-          'Failed to build native library. '
-          'Expected file at: ${prebuiltPath.toFilePath()}',
+          'Prebuilt binary not found at: ${binaryPath.toFilePath()}\n'
+          'This package requires prebuilt binaries. Please report this issue.',
         );
       }
+      throw Exception(
+        'Failed to build native library. '
+        'Expected file at: ${binaryPath.toFilePath()}',
+      );
     }
 
     // Register the code asset
@@ -67,7 +73,7 @@ void main(List<String> args) async {
         package: input.packageName,
         name: '${input.packageName}.dart',
         linkMode: isIosDevice ? StaticLinking() : DynamicLoadingBundled(),
-        file: prebuiltPath,
+        file: binaryPath,
       ),
     );
   });
@@ -105,6 +111,15 @@ String _getLibraryName(OS os, bool isIosSimulator) {
   };
 }
 
+/// Detects if we're in development mode (source checkout) vs published package.
+///
+/// Development mode: has native/build.zig (can build from source)
+/// Published mode: build.zig excluded via .pubignore (only prebuilt binaries)
+bool _isDevelopmentMode(Uri packageRoot) {
+  final buildZig = File(packageRoot.resolve('native/build.zig').toFilePath());
+  return buildZig.existsSync();
+}
+
 Future<void> _buildWithZig(
   Uri packageRoot,
   OS targetOS,
@@ -123,11 +138,12 @@ Future<void> _buildWithZig(
   final nativeDir = packageRoot.resolve('native/').toFilePath();
 
   // Build zig arguments - use platform name directly, build.zig handles
-  // the target resolution including Android NDK libc configuration
+  // the target resolution including Android NDK libc configuration.
+  // Note: -Doptimize is not passed here because buildNamedPlatform in
+  // build.zig already hardcodes ReleaseFast for all platform builds.
   final args = [
     'build',
     '-Dplatform=$platformDir',
-    '-Doptimize=ReleaseFast',
     '-p',
     outputDir.toFilePath(),
   ];

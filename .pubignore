@@ -6,10 +6,15 @@
 
 # Dart build artifacts
 .dart_tool/
+build/
 
-# Zig build artifacts (not needed - we include prebuilt binaries)
-native/.zig-cache/
+# Zig source files, build artifacts and config (not needed for published package)
+native/build.zig
+native/build.zig.zon
+native/src/
 native/zig-out/
+native/.zig-cache/
+.zig-version
 
 # Development files
 dump.rdb

@@ -10,10 +10,7 @@ pubspec.lock
 native/.zig-cache/
 native/zig-out/
 
-# Generated Android libc config files
-native/android-libc-*.txt
-
-# Prebuilt libraries (built via tool/build_all.dart)
+# Prebuilt libraries (built via `zig build -Dall -p lib`)
 native/lib/
 
 # Redis dump file
