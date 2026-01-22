@@ -77,8 +77,8 @@ jobs:
       - name: Install Redis (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          choco install redis-64 -y
-          Start-Process -FilePath "C:\ProgramData\chocolatey\lib\redis-64\redis-server.exe" -NoNewWindow
+          choco install redis -y
+          Start-Process -FilePath "redis-server" -NoNewWindow
 
       - name: Wait for Redis
         shell: bash
