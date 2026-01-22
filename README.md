@@ -190,7 +190,7 @@ This builds for all 11 target platforms and installs to `native/lib/`.
 
 | Platform | Architecture | Toolchain | Target | Library |
 |----------|-------------|-----------|--------|---------|
-| Linux | x64, arm64 | Zig | `x86_64-linux-musl`, `aarch64-linux-musl` | libhiredis.so |
+| Linux | x64, arm64 | Zig | `x86_64-linux-gnu`, `aarch64-linux-gnu` | libhiredis.so |
 | macOS | x64, arm64 | Zig | `x86_64-macos`, `aarch64-macos` | libhiredis.dylib |
 | Windows | x64 | Zig | `x86_64-windows` | hiredis.dll |
 | Android | arm64, arm, x64 | Zig + NDK libc | `aarch64-linux-android`, etc. | libhiredis.so |

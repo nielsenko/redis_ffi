@@ -10,8 +10,8 @@ const Platform = struct {
 
 const platforms = [_]Platform{
     // Desktop
-    .{ .name = "linux-x64", .target = .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .musl } },
-    .{ .name = "linux-arm64", .target = .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .musl } },
+    .{ .name = "linux-x64", .target = .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu } },
+    .{ .name = "linux-arm64", .target = .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .gnu } },
     .{ .name = "macos-x64", .target = .{ .cpu_arch = .x86_64, .os_tag = .macos } },
     .{ .name = "macos-arm64", .target = .{ .cpu_arch = .aarch64, .os_tag = .macos } },
     .{ .name = "windows-x64", .target = .{ .cpu_arch = .x86_64, .os_tag = .windows } },
