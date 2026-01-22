@@ -1,4 +1,4 @@
-@Tags(['redis'])
+@Tags(['redis', 'pubsub'])
 library;
 
 import 'package:redis_ffi/redis_ffi.dart';

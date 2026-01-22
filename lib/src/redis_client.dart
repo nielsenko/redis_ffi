@@ -1,10 +1,94 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ffi';
+import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import 'event_loop_bindings.dart';
 import 'hiredis_bindings.g.dart';
-import 'redis_reply.dart';
+
+bool _dartApiInitialized = false;
+
+void _ensureDartApiInitialized() {
+  if (!_dartApiInitialized) {
+    if (!initializeDartApi()) {
+      throw StateError('Failed to initialize Dart API');
+    }
+    _dartApiInitialized = true;
+  }
+}
+
+const _redisReplyString = 1;
+const _redisReplyArray = 2;
+const _redisReplyInteger = 3;
+const _redisReplyNil = 4;
+const _redisReplyStatus = 5;
+const _redisReplyError = 6;
+const _redisReplyDouble = 7;
+const _redisReplyBool = 8;
+const _redisReplyMap = 9;
+const _redisReplySet = 10;
+const _redisReplyPush = 12;
+
+/// A parsed Redis reply (data copied from native, no manual free needed).
+class _ParsedReply {
+  final int type;
+  final String? string;
+  final int? integer;
+  final List<_ParsedReply?>? elements;
+
+  _ParsedReply._({
+    required this.type,
+    this.string,
+    this.integer,
+    this.elements,
+  });
+
+  bool get isNil => type == _redisReplyNil;
+  bool get isError => type == _redisReplyError;
+  int get length => elements?.length ?? 0;
+  _ParsedReply? operator [](int index) => elements?[index];
+
+  static _ParsedReply? fromNative(dynamic data) {
+    if (data == null) return _ParsedReply._(type: _redisReplyNil);
+    if (data is! List || data.isEmpty) {
+      return _ParsedReply._(type: _redisReplyNil);
+    }
+
+    final type = data[0] as int;
+    switch (type) {
+      case _redisReplyNil:
+        return _ParsedReply._(type: type);
+      case _redisReplyString:
+      case _redisReplyStatus:
+      case _redisReplyError:
+      case _redisReplyDouble:
+        if (data.length < 2) return _ParsedReply._(type: _redisReplyNil);
+        final bytes = data[1] as Uint8List;
+        final str = utf8.decode(bytes, allowMalformed: true);
+        return _ParsedReply._(type: type, string: str);
+      case _redisReplyInteger:
+        if (data.length < 2) return _ParsedReply._(type: _redisReplyNil);
+        return _ParsedReply._(type: type, integer: data[1] as int);
+      case _redisReplyBool:
+        if (data.length < 2) return _ParsedReply._(type: _redisReplyNil);
+        return _ParsedReply._(type: type, integer: data[1] as int);
+      case _redisReplyArray:
+      case _redisReplyMap:
+      case _redisReplySet:
+      case _redisReplyPush:
+        final elements = <_ParsedReply?>[];
+        for (var i = 1; i < data.length; i++) {
+          elements.add(fromNative(data[i]));
+        }
+        return _ParsedReply._(type: type, elements: elements);
+      default:
+        return _ParsedReply._(type: _redisReplyNil);
+    }
+  }
+}
 
 /// Exception thrown when a Redis operation fails.
 class RedisException implements Exception {
@@ -38,9 +122,6 @@ enum RedisPubSubMessageType {
 }
 
 /// A message received from a Redis pub/sub subscription.
-///
-/// String fields are lazily converted from the native reply to avoid
-/// unnecessary UTF-8 decoding if the fields are not accessed.
 class RedisPubSubMessage {
   /// The type of message.
   final RedisPubSubMessageType type;
@@ -48,51 +129,18 @@ class RedisPubSubMessage {
   /// The channel the message was received on.
   final String channel;
 
-  // Lazy message field
-  final Pointer<Char>? _messagePtr;
-  final int _messageLen;
-  String? _message;
-  bool _messageConverted = false;
-
-  // Lazy pattern field
-  final Pointer<Char>? _patternPtr;
-  final int _patternLen;
-  String? _pattern;
-  bool _patternConverted = false;
-
   /// The message payload (null for subscribe/unsubscribe confirmations).
-  String? get message {
-    if (!_messageConverted) {
-      _messageConverted = true;
-      if (_messagePtr != null) {
-        _message = _messagePtr.cast<Utf8>().toDartString(length: _messageLen);
-      }
-    }
-    return _message;
-  }
+  final String? message;
 
   /// The pattern that matched (for pmessage type only).
-  String? get pattern {
-    if (!_patternConverted) {
-      _patternConverted = true;
-      if (_patternPtr != null) {
-        _pattern = _patternPtr.cast<Utf8>().toDartString(length: _patternLen);
-      }
-    }
-    return _pattern;
-  }
+  final String? pattern;
 
   RedisPubSubMessage._({
     required this.type,
     required this.channel,
-    Pointer<Char>? messagePtr,
-    int messageLen = 0,
-    Pointer<Char>? patternPtr,
-    int patternLen = 0,
-  }) : _messagePtr = messagePtr,
-       _messageLen = messageLen,
-       _patternPtr = patternPtr,
-       _patternLen = patternLen;
+    this.message,
+    this.pattern,
+  });
 
   @override
   String toString() {
@@ -122,38 +170,24 @@ class RedisPubSubMessage {
 class RedisClient {
   final String _host;
   final int _port;
-  final Pointer<redisAsyncContext> _ctx;
-  final Pointer<Bool> _stopFlag;
-  final NativeCallable<
-    Void Function(Pointer<redisAsyncContext>, Pointer<Void>, Pointer<Void>)
-  >
-  _replyCallback;
-  Pointer<LoopThreadHandle>? _loopThreadHandle;
+  final Pointer<EventLoopState> _eventLoop;
+  final ReceivePort _receivePort;
 
-  final _pendingCommands = <int, Completer<RedisReply?>>{};
-  final _pendingCallbacks = <int, int>{}; // privdata -> commandId
+  final _pendingCommands = <int, Completer<_ParsedReply?>>{};
   var _nextCommandId = 0;
-  var _nextPrivdata = 1;
   var _closed = false;
   var _flushScheduled = false;
 
-  RedisClient._(
-    this._host,
-    this._port,
-    this._ctx,
-    this._stopFlag,
-    this._replyCallback,
-    this._loopThreadHandle,
-  );
+  RedisClient._(this._host, this._port, this._eventLoop, this._receivePort);
 
   /// Connects to a Redis server.
   ///
   /// Returns a [Future] that completes with the connected client.
   static Future<RedisClient> connect(String host, int port) async {
-    // Set up connection options
+    _ensureDartApiInitialized();
+
     final options = calloc<redisOptions>();
     try {
-      // Zero-initialize
       for (var i = 0; i < sizeOf<redisOptions>(); i++) {
         options.cast<Uint8>()[i] = 0;
       }
@@ -163,12 +197,7 @@ class RedisClient {
         options.ref.type = redisConnectionType.REDIS_CONN_TCP.value;
         options.ref.endpoint.tcp.ip = hostPtr.cast();
         options.ref.endpoint.tcp.port = port;
-
-        // Dart controls memory lifetime
-        options.ref.options =
-            REDIS_OPT_NOAUTOFREE |
-            REDIS_OPT_NOAUTOFREEREPLIES |
-            REDIS_OPT_NO_PUSH_AUTOFREE;
+        options.ref.options = REDIS_OPT_NOAUTOFREE;
 
         final ctx = redisAsyncConnectWithOptions(options);
         if (ctx == nullptr) {
@@ -181,64 +210,39 @@ class RedisClient {
           throw RedisException('Connection failed: $errStr');
         }
 
-        // Allocate stop flag for the I/O loop thread
-        final stopFlag = calloc<Bool>();
-        stopFlag.value = false;
+        final receivePort = ReceivePort();
+        final eventLoop = redis_event_loop_create(
+          ctx,
+          receivePort.sendPort.nativePort,
+        );
 
-        // Create the client first (needed for callback closure)
-        late final RedisClient client;
+        if (eventLoop == nullptr) {
+          receivePort.close();
+          redisAsyncFree(ctx);
+          throw RedisException('Failed to create event loop');
+        }
 
-        // Reply callback - called by hiredis when a command completes
-        void onReply(
-          Pointer<redisAsyncContext> ac,
-          Pointer<Void> replyPtr,
-          Pointer<Void> privdata,
-        ) {
+        final client = RedisClient._(host, port, eventLoop, receivePort);
+
+        receivePort.listen((message) {
           if (client._closed) return;
-
-          final privdataValue = privdata.address;
-          final commandId = client._pendingCallbacks.remove(privdataValue);
-
-          if (commandId == null) return;
-
-          final completer = client._pendingCommands.remove(commandId);
-          if (completer == null) return;
-
-          if (replyPtr == nullptr) {
-            completer.completeError(RedisException('Null reply'));
+          if (message is int && message == -1) {
+            client._handleDisconnect();
             return;
           }
+          if (message is List && message.length == 2) {
+            final commandId = message[0] as int;
+            final replyData = message[1];
+            client._onReplyReceived(commandId, replyData);
+          }
+        });
 
-          completer.complete(RedisReply.fromPointer(replyPtr));
-        }
-
-        final replyCallback =
-            NativeCallable<
-              Void Function(
-                Pointer<redisAsyncContext>,
-                Pointer<Void>,
-                Pointer<Void>,
-              )
-            >.listener(onReply);
-
-        // Start the I/O loop on a background thread
-        final loopThreadHandle = redis_async_start_loop_thread(ctx, stopFlag);
-
-        if (loopThreadHandle == nullptr) {
-          replyCallback.close();
-          calloc.free(stopFlag);
+        if (!redis_event_loop_start(eventLoop)) {
+          receivePort.close();
+          redis_event_loop_destroy(eventLoop);
           redisAsyncFree(ctx);
-          throw RedisException('Failed to start I/O loop thread');
+          throw RedisException('Failed to start event loop');
         }
-
-        client = RedisClient._(
-          host,
-          port,
-          ctx,
-          stopFlag,
-          replyCallback,
-          loopThreadHandle,
-        );
 
         return client;
       } finally {
@@ -260,28 +264,36 @@ class RedisClient {
     }
   }
 
-  /// Schedules a flush at the end of the current microtask.
-  ///
-  /// This enables automatic pipelining - multiple commands issued in the same
-  /// event loop iteration are batched together and sent in a single write.
-  void _scheduleFlush() {
-    if (!_flushScheduled) {
-      _flushScheduled = true;
-      scheduleMicrotask(() {
-        _flushScheduled = false;
-        if (!_closed) {
-          redis_async_flush(_ctx);
-        }
-      });
+  void _handleDisconnect() {
+    if (_closed) return;
+    for (final completer in _pendingCommands.values) {
+      if (!completer.isCompleted) {
+        completer.completeError(RedisException('Connection lost'));
+      }
+    }
+    _pendingCommands.clear();
+  }
+
+  void _onReplyReceived(int commandId, dynamic replyData) {
+    if (_closed) return;
+    final completer = _pendingCommands.remove(commandId);
+    if (completer == null) return;
+
+    final reply = _ParsedReply.fromNative(replyData);
+    if (reply != null && reply.isError) {
+      completer.completeError(RedisException(reply.string ?? 'Unknown error'));
+    } else {
+      completer.complete(reply);
     }
   }
 
   /// Sends a raw command and returns the reply.
-  Future<RedisReply?> _command(List<String> args) async {
+  /// Commands are automatically batched and flushed via microtask.
+  Future<_ParsedReply?> _command(List<String> args) async {
     _checkNotClosed();
 
     final commandId = _nextCommandId++;
-    final completer = Completer<RedisReply?>();
+    final completer = Completer<_ParsedReply?>();
     _pendingCommands[commandId] = completer;
 
     final argc = args.length;
@@ -295,19 +307,20 @@ class RedisClient {
         argvlen[i] = args[i].length;
       }
 
-      final privdata = _nextPrivdata++;
-      _pendingCallbacks[privdata] = commandId;
-
-      redisAsyncCommandArgv(
-        _ctx,
-        _replyCallback.nativeFunction.cast(),
-        Pointer<Void>.fromAddress(privdata),
+      final result = redis_async_command_enqueue(
+        _eventLoop,
+        _receivePort.sendPort.nativePort,
+        commandId,
         argc,
         argv,
         argvlen,
       );
 
-      // Schedule flush at end of microtask for automatic pipelining
+      if (result != 0) {
+        _pendingCommands.remove(commandId);
+        throw RedisException('Failed to send command');
+      }
+
       _scheduleFlush();
     } finally {
       for (var i = 0; i < argc; i++) {
@@ -322,16 +335,26 @@ class RedisClient {
     return completer.future;
   }
 
+  /// Schedules a flush via microtask if not already scheduled.
+  /// This batches all commands issued in the current event loop turn.
+  void _scheduleFlush() {
+    if (!_flushScheduled) {
+      _flushScheduled = true;
+      scheduleMicrotask(() {
+        _flushScheduled = false;
+        if (!_closed) {
+          redis_event_loop_wakeup(_eventLoop);
+        }
+      });
+    }
+  }
+
   /// Pings the server.
   Future<String> ping([String? message]) async {
     final reply = await _command(
       message != null ? ['PING', message] : ['PING'],
     );
-    try {
-      return reply?.string ?? 'PONG';
-    } finally {
-      reply?.free();
-    }
+    return reply?.string ?? 'PONG';
   }
 
   // ============ String Commands ============
@@ -341,11 +364,7 @@ class RedisClient {
   /// Returns `null` if the key does not exist.
   Future<String?> get(String key) async {
     final reply = await _command(['GET', key]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Sets a key to a value.
@@ -384,11 +403,7 @@ class RedisClient {
     if (get) args.add('GET');
 
     final reply = await _command(args);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Gets the values of multiple keys.
@@ -404,9 +419,7 @@ class RedisClient {
         results.add(reply[i]?.string);
       }
       return results;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Sets multiple keys to their respective values.
@@ -415,8 +428,7 @@ class RedisClient {
     keyValues.forEach((key, value) {
       args.addAll([key, value]);
     });
-    final reply = await _command(args);
-    reply?.free();
+    await _command(args);
   }
 
   /// Sets multiple keys only if none of them exist.
@@ -429,11 +441,7 @@ class RedisClient {
       args.addAll([key, value]);
     });
     final reply = await _command(args);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Increments the integer value of a key by one.
@@ -441,11 +449,7 @@ class RedisClient {
   /// Returns the new value after incrementing.
   Future<int> incr(String key) async {
     final reply = await _command(['INCR', key]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Increments the integer value of a key by the given amount.
@@ -453,11 +457,7 @@ class RedisClient {
   /// Returns the new value after incrementing.
   Future<int> incrby(String key, int increment) async {
     final reply = await _command(['INCRBY', key, increment.toString()]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Increments the floating point value of a key by the given amount.
@@ -468,9 +468,7 @@ class RedisClient {
     try {
       final str = reply?.string;
       return str != null ? double.parse(str) : 0.0;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Decrements the integer value of a key by one.
@@ -478,11 +476,7 @@ class RedisClient {
   /// Returns the new value after decrementing.
   Future<int> decr(String key) async {
     final reply = await _command(['DECR', key]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Decrements the integer value of a key by the given amount.
@@ -490,11 +484,7 @@ class RedisClient {
   /// Returns the new value after decrementing.
   Future<int> decrby(String key, int decrement) async {
     final reply = await _command(['DECRBY', key, decrement.toString()]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Appends a value to a key.
@@ -502,21 +492,13 @@ class RedisClient {
   /// Returns the length of the string after the append.
   Future<int> append(String key, String value) async {
     final reply = await _command(['APPEND', key, value]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns the length of the string stored at key.
   Future<int> strlen(String key) async {
     final reply = await _command(['STRLEN', key]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Sets or clears the bit at offset in the string value stored at key.
@@ -529,21 +511,13 @@ class RedisClient {
       offset.toString(),
       value.toString(),
     ]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns the bit value at offset in the string value stored at key.
   Future<int> getbit(String key, int offset) async {
     final reply = await _command(['GETBIT', key, offset.toString()]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Overwrites part of the string stored at key starting at the specified offset.
@@ -551,11 +525,7 @@ class RedisClient {
   /// Returns the length of the string after it was modified.
   Future<int> setrange(String key, int offset, String value) async {
     final reply = await _command(['SETRANGE', key, offset.toString(), value]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns a substring of the string stored at key.
@@ -566,28 +536,17 @@ class RedisClient {
       start.toString(),
       end.toString(),
     ]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Sets the value and expiration of a key in seconds.
   Future<void> setex(String key, int seconds, String value) async {
-    final reply = await _command(['SETEX', key, seconds.toString(), value]);
-    reply?.free();
+    await _command(['SETEX', key, seconds.toString(), value]);
   }
 
   /// Sets the value and expiration of a key in milliseconds.
   Future<void> psetex(String key, int milliseconds, String value) async {
-    final reply = await _command([
-      'PSETEX',
-      key,
-      milliseconds.toString(),
-      value,
-    ]);
-    reply?.free();
+    await _command(['PSETEX', key, milliseconds.toString(), value]);
   }
 
   /// Sets the value of a key only if the key does not exist.
@@ -595,31 +554,19 @@ class RedisClient {
   /// Returns `true` if the key was set, `false` if it already existed.
   Future<bool> setnx(String key, String value) async {
     final reply = await _command(['SETNX', key, value]);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Atomically sets a key to a value and returns the old value.
   Future<String?> getset(String key, String value) async {
     final reply = await _command(['GETSET', key, value]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Gets the value of a key and deletes it.
   Future<String?> getdel(String key) async {
     final reply = await _command(['GETDEL', key]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Gets the value of a key and optionally sets its expiration.
@@ -639,11 +586,7 @@ class RedisClient {
     if (persist) args.add('PERSIST');
 
     final reply = await _command(args);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   // ============ Key Commands ============
@@ -653,11 +596,7 @@ class RedisClient {
   /// Returns the number of keys that were deleted.
   Future<int> del(List<String> keys) async {
     final reply = await _command(['DEL', ...keys]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Deletes one or more keys asynchronously (non-blocking).
@@ -665,11 +604,7 @@ class RedisClient {
   /// Returns the number of keys that were scheduled for deletion.
   Future<int> unlink(List<String> keys) async {
     final reply = await _command(['UNLINK', ...keys]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Checks if one or more keys exist.
@@ -677,11 +612,7 @@ class RedisClient {
   /// Returns the number of keys that exist.
   Future<int> existsCount(List<String> keys) async {
     final reply = await _command(['EXISTS', ...keys]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Checks if a key exists.
@@ -694,11 +625,7 @@ class RedisClient {
   /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
   Future<bool> expire(String key, int seconds) async {
     final reply = await _command(['EXPIRE', key, seconds.toString()]);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Sets a timeout on a key in milliseconds.
@@ -706,11 +633,7 @@ class RedisClient {
   /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
   Future<bool> pexpire(String key, int milliseconds) async {
     final reply = await _command(['PEXPIRE', key, milliseconds.toString()]);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Sets an absolute Unix timestamp expiry on a key (in seconds).
@@ -718,11 +641,7 @@ class RedisClient {
   /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
   Future<bool> expireat(String key, int timestamp) async {
     final reply = await _command(['EXPIREAT', key, timestamp.toString()]);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Sets an absolute Unix timestamp expiry on a key (in milliseconds).
@@ -730,11 +649,7 @@ class RedisClient {
   /// Returns `true` if the timeout was set, `false` if the key doesn't exist.
   Future<bool> pexpireat(String key, int timestamp) async {
     final reply = await _command(['PEXPIREAT', key, timestamp.toString()]);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Gets the remaining time to live of a key in seconds.
@@ -742,11 +657,7 @@ class RedisClient {
   /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
   Future<int> ttl(String key) async {
     final reply = await _command(['TTL', key]);
-    try {
-      return reply?.integer ?? -2;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? -2;
   }
 
   /// Gets the remaining time to live of a key in milliseconds.
@@ -754,11 +665,7 @@ class RedisClient {
   /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
   Future<int> pttl(String key) async {
     final reply = await _command(['PTTL', key]);
-    try {
-      return reply?.integer ?? -2;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? -2;
   }
 
   /// Removes the expiry from a key.
@@ -767,11 +674,7 @@ class RedisClient {
   /// exist or has no associated timeout.
   Future<bool> persist(String key) async {
     final reply = await _command(['PERSIST', key]);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Returns the absolute Unix timestamp (in seconds) at which the key will expire.
@@ -779,11 +682,7 @@ class RedisClient {
   /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
   Future<int> expiretime(String key) async {
     final reply = await _command(['EXPIRETIME', key]);
-    try {
-      return reply?.integer ?? -2;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? -2;
   }
 
   /// Returns the absolute Unix timestamp (in milliseconds) at which the key will expire.
@@ -791,11 +690,7 @@ class RedisClient {
   /// Returns -2 if the key doesn't exist, -1 if the key has no expiry.
   Future<int> pexpiretime(String key) async {
     final reply = await _command(['PEXPIRETIME', key]);
-    try {
-      return reply?.integer ?? -2;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? -2;
   }
 
   /// Returns the type of the value stored at key.
@@ -803,19 +698,14 @@ class RedisClient {
   /// Returns "none" if the key doesn't exist.
   Future<String> type(String key) async {
     final reply = await _command(['TYPE', key]);
-    try {
-      return reply?.string ?? 'none';
-    } finally {
-      reply?.free();
-    }
+    return reply?.string ?? 'none';
   }
 
   /// Renames a key.
   ///
   /// Throws if the key doesn't exist.
   Future<void> rename(String key, String newKey) async {
-    final reply = await _command(['RENAME', key, newKey]);
-    reply?.free();
+    await _command(['RENAME', key, newKey]);
   }
 
   /// Renames a key only if the new key doesn't already exist.
@@ -823,11 +713,7 @@ class RedisClient {
   /// Returns `true` if the key was renamed, `false` if the new key already exists.
   Future<bool> renamenx(String key, String newKey) async {
     final reply = await _command(['RENAMENX', key, newKey]);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Returns all keys matching the given pattern.
@@ -844,9 +730,7 @@ class RedisClient {
         if (key != null) results.add(key);
       }
       return results;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Incrementally iterates over keys matching a pattern.
@@ -877,19 +761,13 @@ class RedisClient {
         }
       }
       return (nextCursor, keys);
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns a random key from the database.
   Future<String?> randomkey() async {
     final reply = await _command(['RANDOMKEY']);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Touches one or more keys (updates last access time).
@@ -897,11 +775,7 @@ class RedisClient {
   /// Returns the number of keys that were touched.
   Future<int> touch(List<String> keys) async {
     final reply = await _command(['TOUCH', ...keys]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns the number of bytes that a key and its value require in RAM.
@@ -910,11 +784,7 @@ class RedisClient {
     if (samples != null) args.addAll(['SAMPLES', samples.toString()]);
 
     final reply = await _command(args);
-    try {
-      return reply?.integer;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer;
   }
 
   /// Copies a key to another key.
@@ -931,41 +801,25 @@ class RedisClient {
     if (replace) args.add('REPLACE');
 
     final reply = await _command(args);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Returns the time since the object stored at key is idle.
   Future<int?> objectIdletime(String key) async {
     final reply = await _command(['OBJECT', 'IDLETIME', key]);
-    try {
-      return reply?.integer;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer;
   }
 
   /// Returns the access frequency of the object stored at key.
   Future<int?> objectFreq(String key) async {
     final reply = await _command(['OBJECT', 'FREQ', key]);
-    try {
-      return reply?.integer;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer;
   }
 
   /// Returns the encoding of the object stored at key.
   Future<String?> objectEncoding(String key) async {
     final reply = await _command(['OBJECT', 'ENCODING', key]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   // ============ Hash Commands ============
@@ -976,11 +830,7 @@ class RedisClient {
   /// existed and was updated).
   Future<int> hset(String key, String field, String value) async {
     final reply = await _command(['HSET', key, field, value]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Sets multiple fields in a hash.
@@ -993,21 +843,13 @@ class RedisClient {
     }
 
     final reply = await _command(args);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Gets the value of a field in a hash.
   Future<String?> hget(String key, String field) async {
     final reply = await _command(['HGET', key, field]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Gets all fields and values in a hash.
@@ -1025,9 +867,7 @@ class RedisClient {
         }
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Gets the values of multiple fields in a hash.
@@ -1041,9 +881,7 @@ class RedisClient {
         result.add(reply[i]?.string);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Deletes one or more fields from a hash.
@@ -1051,21 +889,13 @@ class RedisClient {
   /// Returns the number of fields that were removed.
   Future<int> hdel(String key, List<String> fields) async {
     final reply = await _command(['HDEL', key, ...fields]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Checks if a field exists in a hash.
   Future<bool> hexists(String key, String field) async {
     final reply = await _command(['HEXISTS', key, field]);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Gets all field names in a hash.
@@ -1080,9 +910,7 @@ class RedisClient {
         if (field != null) result.add(field);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Gets all values in a hash.
@@ -1097,19 +925,13 @@ class RedisClient {
         if (value != null) result.add(value);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Gets the number of fields in a hash.
   Future<int> hlen(String key) async {
     final reply = await _command(['HLEN', key]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Increments the integer value of a field in a hash.
@@ -1117,11 +939,7 @@ class RedisClient {
   /// Returns the value after the increment.
   Future<int> hincrby(String key, String field, int increment) async {
     final reply = await _command(['HINCRBY', key, field, increment.toString()]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Increments the float value of a field in a hash.
@@ -1141,9 +959,7 @@ class RedisClient {
     try {
       final str = reply?.string;
       return str != null ? double.parse(str) : 0.0;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Sets a field in a hash only if it does not exist.
@@ -1151,21 +967,13 @@ class RedisClient {
   /// Returns `true` if the field was set, `false` if it already existed.
   Future<bool> hsetnx(String key, String field, String value) async {
     final reply = await _command(['HSETNX', key, field, value]);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Gets the string length of a field value in a hash.
   Future<int> hstrlen(String key, String field) async {
     final reply = await _command(['HSTRLEN', key, field]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns a random field from a hash.
@@ -1198,9 +1006,7 @@ class RedisClient {
         }
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Incrementally iterates over fields in a hash.
@@ -1236,9 +1042,7 @@ class RedisClient {
         }
       }
       return (nextCursor, result);
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   // ============ List Commands ============
@@ -1248,11 +1052,7 @@ class RedisClient {
   /// Returns the length of the list after the push.
   Future<int> lpush(String key, List<String> values) async {
     final reply = await _command(['LPUSH', key, ...values]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Pushes values to the right (tail) of a list.
@@ -1260,11 +1060,7 @@ class RedisClient {
   /// Returns the length of the list after the push.
   Future<int> rpush(String key, List<String> values) async {
     final reply = await _command(['RPUSH', key, ...values]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Pushes a value to the left of a list only if the list exists.
@@ -1273,11 +1069,7 @@ class RedisClient {
   /// exist.
   Future<int> lpushx(String key, List<String> values) async {
     final reply = await _command(['LPUSHX', key, ...values]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Pushes a value to the right of a list only if the list exists.
@@ -1286,31 +1078,19 @@ class RedisClient {
   /// exist.
   Future<int> rpushx(String key, List<String> values) async {
     final reply = await _command(['RPUSHX', key, ...values]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Removes and returns the first element of a list.
   Future<String?> lpop(String key) async {
     final reply = await _command(['LPOP', key]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Removes and returns the last element of a list.
   Future<String?> rpop(String key) async {
     final reply = await _command(['RPOP', key]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Removes and returns multiple elements from the left of a list.
@@ -1330,9 +1110,7 @@ class RedisClient {
         }
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Removes and returns multiple elements from the right of a list.
@@ -1351,9 +1129,7 @@ class RedisClient {
         }
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns a range of elements from a list.
@@ -1376,9 +1152,7 @@ class RedisClient {
         if (item != null) result.add(item);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns the element at [index] in the list.
@@ -1386,31 +1160,18 @@ class RedisClient {
   /// Negative indices count from the end (-1 is the last element).
   Future<String?> lindex(String key, int index) async {
     final reply = await _command(['LINDEX', key, index.toString()]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Sets the element at [index] in the list.
   Future<void> lset(String key, int index, String value) async {
-    final reply = await _command(['LSET', key, index.toString(), value]);
-    try {
-      // LSET returns OK on success
-    } finally {
-      reply?.free();
-    }
+    await _command(['LSET', key, index.toString(), value]);
   }
 
   /// Returns the length of a list.
   Future<int> llen(String key) async {
     final reply = await _command(['LLEN', key]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Inserts an element before or after a pivot element.
@@ -1425,11 +1186,7 @@ class RedisClient {
   }) async {
     final position = before ? 'BEFORE' : 'AFTER';
     final reply = await _command(['LINSERT', key, position, pivot, value]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Removes [count] occurrences of [value] from the list.
@@ -1441,26 +1198,12 @@ class RedisClient {
   /// Returns the number of removed elements.
   Future<int> lrem(String key, int count, String value) async {
     final reply = await _command(['LREM', key, count.toString(), value]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Trims a list to the specified range.
   Future<void> ltrim(String key, int start, int stop) async {
-    final reply = await _command([
-      'LTRIM',
-      key,
-      start.toString(),
-      stop.toString(),
-    ]);
-    try {
-      // LTRIM returns OK
-    } finally {
-      reply?.free();
-    }
+    await _command(['LTRIM', key, start.toString(), stop.toString()]);
   }
 
   /// Atomically moves an element from one list to another.
@@ -1479,11 +1222,7 @@ class RedisClient {
       srcDirection,
       dstDirection,
     ]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Returns the index of the first matching element in a list.
@@ -1494,9 +1233,7 @@ class RedisClient {
     try {
       if (reply == null || reply.isNil) return null;
       return reply.integer;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   // ============ Set Commands ============
@@ -1506,11 +1243,7 @@ class RedisClient {
   /// Returns the number of members that were added (not already present).
   Future<int> sadd(String key, List<String> members) async {
     final reply = await _command(['SADD', key, ...members]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Removes one or more members from a set.
@@ -1518,11 +1251,7 @@ class RedisClient {
   /// Returns the number of members that were removed.
   Future<int> srem(String key, List<String> members) async {
     final reply = await _command(['SREM', key, ...members]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns all members of a set.
@@ -1537,19 +1266,13 @@ class RedisClient {
         if (member != null) result.add(member);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Checks if a member is in a set.
   Future<bool> sismember(String key, String member) async {
     final reply = await _command(['SISMEMBER', key, member]);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Checks if multiple members are in a set.
@@ -1565,29 +1288,19 @@ class RedisClient {
         result.add((reply[i]?.integer ?? 0) == 1);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns the number of members in a set.
   Future<int> scard(String key) async {
     final reply = await _command(['SCARD', key]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Removes and returns a random member from a set.
   Future<String?> spop(String key) async {
     final reply = await _command(['SPOP', key]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Removes and returns multiple random members from a set.
@@ -1602,19 +1315,13 @@ class RedisClient {
         if (member != null) result.add(member);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns a random member from a set without removing it.
   Future<String?> srandmember(String key) async {
     final reply = await _command(['SRANDMEMBER', key]);
-    try {
-      return reply?.string;
-    } finally {
-      reply?.free();
-    }
+    return reply?.string;
   }
 
   /// Returns multiple random members from a set without removing them.
@@ -1629,9 +1336,7 @@ class RedisClient {
         if (member != null) result.add(member);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Moves a member from one set to another.
@@ -1640,11 +1345,7 @@ class RedisClient {
   /// set.
   Future<bool> smove(String source, String destination, String member) async {
     final reply = await _command(['SMOVE', source, destination, member]);
-    try {
-      return (reply?.integer ?? 0) == 1;
-    } finally {
-      reply?.free();
-    }
+    return (reply?.integer ?? 0) == 1;
   }
 
   /// Returns the difference between the first set and all subsequent sets.
@@ -1659,9 +1360,7 @@ class RedisClient {
         if (member != null) result.add(member);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Stores the difference between sets in a destination set.
@@ -1669,11 +1368,7 @@ class RedisClient {
   /// Returns the number of members in the resulting set.
   Future<int> sdiffstore(String destination, List<String> keys) async {
     final reply = await _command(['SDIFFSTORE', destination, ...keys]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns the intersection of all given sets.
@@ -1688,9 +1383,7 @@ class RedisClient {
         if (member != null) result.add(member);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Stores the intersection of sets in a destination set.
@@ -1698,11 +1391,7 @@ class RedisClient {
   /// Returns the number of members in the resulting set.
   Future<int> sinterstore(String destination, List<String> keys) async {
     final reply = await _command(['SINTERSTORE', destination, ...keys]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns the cardinality of the intersection of all given sets.
@@ -1711,11 +1400,7 @@ class RedisClient {
     if (limit != null) args.addAll(['LIMIT', limit.toString()]);
 
     final reply = await _command(args);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns the union of all given sets.
@@ -1730,9 +1415,7 @@ class RedisClient {
         if (member != null) result.add(member);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Stores the union of sets in a destination set.
@@ -1740,11 +1423,7 @@ class RedisClient {
   /// Returns the number of members in the resulting set.
   Future<int> sunionstore(String destination, List<String> keys) async {
     final reply = await _command(['SUNIONSTORE', destination, ...keys]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Incrementally iterates over members of a set.
@@ -1777,9 +1456,7 @@ class RedisClient {
         }
       }
       return (nextCursor, result);
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   // ============ Sorted Set Commands ============
@@ -1819,11 +1496,7 @@ class RedisClient {
     }
 
     final reply = await _command(args);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Removes one or more members from a sorted set.
@@ -1831,11 +1504,7 @@ class RedisClient {
   /// Returns the number of members removed.
   Future<int> zrem(String key, List<String> members) async {
     final reply = await _command(['ZREM', key, ...members]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns the score of a member in a sorted set.
@@ -1845,9 +1514,7 @@ class RedisClient {
       if (reply == null || reply.isNil) return null;
       final str = reply.string;
       return str != null ? double.parse(str) : null;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns the scores of multiple members in a sorted set.
@@ -1867,9 +1534,7 @@ class RedisClient {
         }
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns the rank (index) of a member in a sorted set (0-based).
@@ -1880,9 +1545,7 @@ class RedisClient {
     try {
       if (reply == null || reply.isNil) return null;
       return reply.integer;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns the reverse rank (index) of a member in a sorted set (0-based).
@@ -1893,30 +1556,20 @@ class RedisClient {
     try {
       if (reply == null || reply.isNil) return null;
       return reply.integer;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns the number of members in a sorted set.
   Future<int> zcard(String key) async {
     final reply = await _command(['ZCARD', key]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns the number of members in a sorted set with scores within the
   /// given range.
   Future<int> zcount(String key, String min, String max) async {
     final reply = await _command(['ZCOUNT', key, min, max]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Returns a range of members from a sorted set by index.
@@ -1941,9 +1594,7 @@ class RedisClient {
         if (item != null) result.add(item);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns a range of members from a sorted set by index, with scores.
@@ -1973,9 +1624,7 @@ class RedisClient {
         }
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns a range of members from a sorted set by score.
@@ -2001,9 +1650,7 @@ class RedisClient {
         if (item != null) result.add(item);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Returns a range of members from a sorted set by score (highest to lowest).
@@ -2029,9 +1676,7 @@ class RedisClient {
         if (item != null) result.add(item);
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Increments the score of a member in a sorted set.
@@ -2047,9 +1692,7 @@ class RedisClient {
     try {
       final str = reply?.string;
       return str != null ? double.parse(str) : 0.0;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Removes all members in a sorted set within the given score range.
@@ -2057,11 +1700,7 @@ class RedisClient {
   /// Returns the number of members removed.
   Future<int> zremrangebyscore(String key, String min, String max) async {
     final reply = await _command(['ZREMRANGEBYSCORE', key, min, max]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Removes all members in a sorted set within the given rank range.
@@ -2074,11 +1713,7 @@ class RedisClient {
       start.toString(),
       stop.toString(),
     ]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Removes and returns members with the lowest scores from a sorted set.
@@ -2096,9 +1731,7 @@ class RedisClient {
         }
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Removes and returns members with the highest scores from a sorted set.
@@ -2116,9 +1749,7 @@ class RedisClient {
         }
       }
       return result;
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   /// Computes the union of multiple sorted sets and stores the result.
@@ -2140,11 +1771,7 @@ class RedisClient {
     }
 
     final reply = await _command(args);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Computes the intersection of multiple sorted sets and stores the result.
@@ -2166,11 +1793,7 @@ class RedisClient {
     }
 
     final reply = await _command(args);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Incrementally iterates over members and scores in a sorted set.
@@ -2206,9 +1829,7 @@ class RedisClient {
         }
       }
       return (nextCursor, result);
-    } finally {
-      reply?.free();
-    }
+    } finally {}
   }
 
   // ============ Pub/Sub API ============
@@ -2256,11 +1877,7 @@ class RedisClient {
   /// Publishes a message to a channel.
   Future<int> publish(String channel, String message) async {
     final reply = await _command(['PUBLISH', channel, message]);
-    try {
-      return reply?.integer ?? 0;
-    } finally {
-      reply?.free();
-    }
+    return reply?.integer ?? 0;
   }
 
   /// Closes the connection.
@@ -2273,21 +1890,12 @@ class RedisClient {
       completer.completeError(RedisException('Client closed'));
     }
     _pendingCommands.clear();
-    _pendingCallbacks.clear();
 
-    // Signal the I/O loop to stop
-    _stopFlag.value = true;
+    // Stop and destroy the event loop (this also frees the async context)
+    redis_event_loop_destroy(_eventLoop);
 
-    // Stop the background thread and wait for it to exit
-    if (_loopThreadHandle != null) {
-      redis_async_stop_loop_thread(_loopThreadHandle!);
-      _loopThreadHandle = null;
-    }
-
-    // Free resources
-    redisAsyncFree(_ctx);
-    _replyCallback.close();
-    calloc.free(_stopFlag);
+    // Close the receive port
+    _receivePort.close();
   }
 }
 
@@ -2295,21 +1903,12 @@ class RedisClient {
 
 /// A subscription that manages its own Redis connection.
 class _RedisSubscription {
-  final Pointer<redisAsyncContext> _ctx;
-  final Pointer<Bool> _stopFlag;
-  final NativeCallable<
-    Void Function(Pointer<redisAsyncContext>, Pointer<Void>, Pointer<Void>)
-  >
-  _replyCallback;
-  Pointer<LoopThreadHandle>? _loopThreadHandle;
+  final Pointer<EventLoopState> _eventLoop;
+  final ReceivePort _receivePort;
   var _closed = false;
+  var _nextCommandId = 0;
 
-  _RedisSubscription._(
-    this._ctx,
-    this._stopFlag,
-    this._replyCallback,
-    this._loopThreadHandle,
-  );
+  _RedisSubscription._(this._eventLoop, this._receivePort);
 
   /// Creates a subscription stream that opens a dedicated connection.
   static Stream<RedisPubSubMessage> create(
@@ -2336,10 +1935,7 @@ class _RedisSubscription {
               options.ref.type = redisConnectionType.REDIS_CONN_TCP.value;
               options.ref.endpoint.tcp.ip = hostPtr.cast();
               options.ref.endpoint.tcp.port = port;
-              options.ref.options =
-                  REDIS_OPT_NOAUTOFREE |
-                  REDIS_OPT_NOAUTOFREEREPLIES |
-                  REDIS_OPT_NO_PUSH_AUTOFREE;
+              options.ref.options = REDIS_OPT_NOAUTOFREE;
 
               final ctx = redisAsyncConnectWithOptions(options);
               if (ctx == nullptr) {
@@ -2358,67 +1954,50 @@ class _RedisSubscription {
                 return;
               }
 
-              final stopFlag = calloc<Bool>();
-              stopFlag.value = false;
-
-              // Reply callback
-              void onReply(
-                Pointer<redisAsyncContext> ac,
-                Pointer<Void> replyPtr,
-                Pointer<Void> privdata,
-              ) {
-                if (subscription?._closed ?? true) return;
-                if (controller.isClosed) return;
-                if (replyPtr == nullptr) return;
-
-                final reply = replyPtr.cast<redisReply>();
-
-                if (reply.ref.type != REDIS_REPLY_ARRAY ||
-                    reply.ref.elements < 3) {
-                  return;
-                }
-                final firstElem = reply.ref.element[0];
-                if (firstElem.ref.type != REDIS_REPLY_STRING) {
-                  return;
-                }
-                final type = _parseMessageType(
-                  firstElem.ref.str,
-                  firstElem.ref.len,
-                );
-                final msg = _createPubSubMessage(reply, type);
-                controller.add(msg);
-              }
-
-              final replyCallback =
-                  NativeCallable<
-                    Void Function(
-                      Pointer<redisAsyncContext>,
-                      Pointer<Void>,
-                      Pointer<Void>,
-                    )
-                  >.listener(onReply);
-
-              final loopThreadHandle = redis_async_start_loop_thread(
+              final receivePort = ReceivePort();
+              final eventLoop = redis_event_loop_create(
                 ctx,
-                stopFlag,
+                receivePort.sendPort.nativePort,
               );
 
-              if (loopThreadHandle == nullptr) {
-                replyCallback.close();
-                calloc.free(stopFlag);
+              if (eventLoop == nullptr) {
+                receivePort.close();
                 redisAsyncFree(ctx);
                 controller.addError(
-                  RedisException('Failed to start I/O loop thread'),
+                  RedisException('Failed to create event loop'),
                 );
                 return;
               }
 
-              subscription = _RedisSubscription._(
-                ctx,
-                stopFlag,
-                replyCallback,
-                loopThreadHandle,
-              );
+              subscription = _RedisSubscription._(eventLoop, receivePort);
+
+              // Listen for pub/sub messages
+              receivePort.listen((message) {
+                if (subscription?._closed ?? true) return;
+                if (controller.isClosed) return;
+                if (message is int && message == -1) {
+                  // Disconnect
+                  controller.addError(RedisException('Connection lost'));
+                  return;
+                }
+                if (message is List && message.length == 2) {
+                  final replyData = message[1];
+                  final pubsubMsg = _parsePubSubMessage(replyData);
+                  if (pubsubMsg != null) {
+                    controller.add(pubsubMsg);
+                  }
+                }
+              });
+
+              if (!redis_event_loop_start(eventLoop)) {
+                receivePort.close();
+                redis_event_loop_destroy(eventLoop);
+                redisAsyncFree(ctx);
+                controller.addError(
+                  RedisException('Failed to start event loop'),
+                );
+                return;
+              }
 
               // Send SUBSCRIBE and PSUBSCRIBE commands
               subscription!._sendSubscribeCommand('SUBSCRIBE', channels);
@@ -2442,9 +2021,62 @@ class _RedisSubscription {
     return controller.stream;
   }
 
+  /// Parses a pub/sub message from the serialized reply data.
+  static RedisPubSubMessage? _parsePubSubMessage(dynamic data) {
+    final reply = _ParsedReply.fromNative(data);
+    if (reply == null || reply.elements == null || reply.elements!.length < 3) {
+      return null;
+    }
+
+    final typeElem = reply[0];
+    if (typeElem == null ||
+        typeElem.type != _redisReplyString ||
+        typeElem.string == null) {
+      return null;
+    }
+
+    final typeStr = typeElem.string!;
+    final type = switch (typeStr) {
+      'message' => RedisPubSubMessageType.message,
+      'pmessage' => RedisPubSubMessageType.pmessage,
+      'subscribe' => RedisPubSubMessageType.subscribe,
+      'unsubscribe' => RedisPubSubMessageType.unsubscribe,
+      'psubscribe' => RedisPubSubMessageType.psubscribe,
+      'punsubscribe' => RedisPubSubMessageType.punsubscribe,
+      _ => null,
+    };
+
+    if (type == null) return null;
+
+    String channel = '';
+    String? message;
+    String? pattern;
+
+    if (type == RedisPubSubMessageType.pmessage &&
+        reply.elements!.length >= 4) {
+      pattern = reply[1]?.string;
+      channel = reply[2]?.string ?? '';
+      message = reply[3]?.string;
+    } else if (type == RedisPubSubMessageType.message &&
+        reply.elements!.length >= 3) {
+      channel = reply[1]?.string ?? '';
+      message = reply[2]?.string;
+    } else if (reply.elements!.length >= 2) {
+      channel = reply[1]?.string ?? '';
+    }
+
+    return RedisPubSubMessage._(
+      type: type,
+      channel: channel,
+      message: message,
+      pattern: pattern,
+    );
+  }
+
   void _sendSubscribeCommand(String cmd, List<String> targets) {
     if (targets.isEmpty) return;
 
+    final commandId = _nextCommandId++;
     final argc = targets.length + 1;
     final argv = calloc<Pointer<Char>>(argc);
     final argvlen = calloc<Size>(argc);
@@ -2460,16 +2092,15 @@ class _RedisSubscription {
         argvlen[i + 1] = targets[i].length;
       }
 
-      redisAsyncCommandArgv(
-        _ctx,
-        _replyCallback.nativeFunction.cast(),
-        nullptr,
+      // Use pubsub command for persistent callbacks
+      redis_async_pubsub_command(
+        _eventLoop,
+        _receivePort.sendPort.nativePort,
+        commandId,
         argc,
         argv,
         argvlen,
       );
-
-      redis_async_flush(_ctx);
     } finally {
       for (var i = 0; i < argc; i++) {
         if (argv[i] != nullptr) {
@@ -2485,81 +2116,8 @@ class _RedisSubscription {
     if (_closed) return;
     _closed = true;
 
-    _stopFlag.value = true;
-
-    if (_loopThreadHandle != null) {
-      redis_async_stop_loop_thread(_loopThreadHandle!);
-      _loopThreadHandle = null;
-    }
-
-    redisAsyncFree(_ctx);
-    _replyCallback.close();
-    calloc.free(_stopFlag);
+    // Destroy the event loop (this also frees the async context)
+    redis_event_loop_destroy(_eventLoop);
+    _receivePort.close();
   }
-}
-
-// ============ Helper functions ============
-
-/// Compares a C string pointer against an ASCII string without allocation.
-bool _cStrEquals(Pointer<Char> cstr, int len, String ascii) {
-  if (len != ascii.length) return false;
-  for (var i = 0; i < len; i++) {
-    if (cstr[i] != ascii.codeUnitAt(i)) return false;
-  }
-  return true;
-}
-
-/// Parses a pub/sub message type from a C string.
-/// Since all message type lengths are unique, we only verify content in debug mode.
-RedisPubSubMessageType _parseMessageType(Pointer<Char> str, int len) {
-  RedisPubSubMessageType type = switch (len) {
-    7 => .message,
-    8 => .pmessage,
-    9 => .subscribe,
-    10 => .psubscribe,
-    11 => .unsubscribe,
-    12 => .punsubscribe,
-    _ => throw StateError('Unknown pub/sub message type with length $len'),
-  };
-  assert(_cStrEquals(str, len, type.name));
-  return type;
-}
-
-/// Creates a RedisPubSubMessage from a redisReply with lazy string conversion.
-RedisPubSubMessage _createPubSubMessage(
-  Pointer<redisReply> reply,
-  RedisPubSubMessageType type,
-) {
-  // Channel is always eagerly converted since it's typically accessed
-  String channel = '';
-  Pointer<Char>? messagePtr;
-  int messageLen = 0;
-  Pointer<Char>? patternPtr;
-  int patternLen = 0;
-
-  if (type == .pmessage && reply.ref.elements >= 4) {
-    final patternElem = reply.ref.element[1];
-    patternPtr = patternElem.ref.str;
-    patternLen = patternElem.ref.len;
-    channel = reply.ref.element[2].ref.str.cast<Utf8>().toDartString();
-    final msgElem = reply.ref.element[3];
-    messagePtr = msgElem.ref.str;
-    messageLen = msgElem.ref.len;
-  } else if (type == .message && reply.ref.elements >= 3) {
-    channel = reply.ref.element[1].ref.str.cast<Utf8>().toDartString();
-    final msgElem = reply.ref.element[2];
-    messagePtr = msgElem.ref.str;
-    messageLen = msgElem.ref.len;
-  } else if (reply.ref.elements >= 2) {
-    channel = reply.ref.element[1].ref.str.cast<Utf8>().toDartString();
-  }
-
-  return RedisPubSubMessage._(
-    type: type,
-    channel: channel,
-    messagePtr: messagePtr,
-    messageLen: messageLen,
-    patternPtr: patternPtr,
-    patternLen: patternLen,
-  );
 }

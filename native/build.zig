@@ -226,8 +226,17 @@ fn buildLibraryWithOptimize(
         .flags = cflags,
     });
 
+    // Add Dart API DL sources
+    lib.addCSourceFiles(.{
+        .files = &.{"src/dart_api/dart_api_dl.c"},
+        .flags = &.{},
+    });
+
     // Include path for hiredis headers
     lib.addIncludePath(hiredis_path);
+
+    // Include path for Dart API headers
+    lib.addIncludePath(b.path("src/dart_api"));
 
     // For Android, we need to provide NDK libc paths
     if (is_android) {

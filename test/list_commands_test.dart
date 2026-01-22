@@ -53,6 +53,7 @@ void main() {
     });
 
     test('lpopCount and rpopCount', () async {
+      await client.del(['list4']);
       await client.rpush('list4', ['a', 'b', 'c', 'd', 'e']);
 
       expect(await client.lpopCount('list4', 2), equals(['a', 'b']));

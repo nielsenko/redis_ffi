@@ -18,3 +18,9 @@ native/lib/
 
 # Redis dump file
 dump.rdb
+
+# Build output
+build/
+
+# Profile output
+profile_output.txt

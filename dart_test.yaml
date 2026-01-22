@@ -16,3 +16,4 @@ tags:
   redis:
     # Tests tagged with 'redis' require a running Redis server
     # To start a Redis server: redis-server --daemonize yes --port 6379
+  pubsub:
