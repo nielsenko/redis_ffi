@@ -155,6 +155,18 @@ Future<void> _buildWithZig(
     args.add('-Dndk=$ndkPath');
   }
 
+  // On Windows, explicitly set cache directories to avoid AppDataDirUnavailable error
+  // (CI runners may not have LOCALAPPDATA set properly)
+  if (Platform.isWindows) {
+    final tempDir = Directory.systemTemp.path;
+    args.addAll([
+      '--cache-dir',
+      '$tempDir\\zig-cache',
+      '--global-cache-dir',
+      '$tempDir\\zig-global-cache',
+    ]);
+  }
+
   // Build with zig
   final result = await Process.run('zig', args, workingDirectory: nativeDir);
 
